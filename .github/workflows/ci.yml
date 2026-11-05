@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build + vet + test
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # ⛔ SAY WHICH TOOLCHAIN RAN. A green check that does not record the
+      # compiler behind it makes every figure measured under it
+      # unattributable.
+      - run: go version
+
+      - name: gofmt
+        run: |
+          drift=$(gofmt -l .)
+          if [ -n "$drift" ]; then echo "::error::not gofmt-clean:"; echo "$drift"; exit 1; fi
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test -race -timeout 10m ./...
+
+      # ⛔ THE COMMAND IS THE POINT, SO THE COMMAND IS RUN. This repository
+      # exists to make thirteen libraries reachable from a shell; a suite that
+      # only called functions would leave the one thing it is for untested.
+      - name: convert a document end to end
+        run: |
+          set -euo pipefail
+          go build -o /tmp/doc2pdf .
+          printf '# Title\n\nProse with *emphasis*.\n' > /tmp/in.md
+          /tmp/doc2pdf /tmp/in.md /tmp/out.pdf
+          head -c 4 /tmp/out.pdf | grep -q '%PDF'
+          /tmp/doc2pdf --list | grep -q 'go-ooxml/ooxml'
