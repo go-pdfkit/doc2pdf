@@ -39,7 +39,15 @@ jobs:
       - name: vet
         run: go vet ./...
 
+      # ⛔ CGO_ENABLED=1 HERE AND NOWHERE ELSE. The job builds with cgo OFF,
+      # because "pure Go, CGO-free" is a claim about the BUILD and the build is
+      # where it has to hold. The race detector is a test instrument and needs
+      # cgo to exist at all — the first version of this file set 0 for the job
+      # and asked for -race anyway, which is not a weak check but no check:
+      # "go: -race requires cgo", and the step fails before a test runs.
       - name: test
+        env:
+          CGO_ENABLED: "1"
         run: go test -race -timeout 10m ./...
 
       # ⛔ THE COMMAND IS THE POINT, SO THE COMMAND IS RUN. This repository
