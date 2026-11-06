@@ -175,11 +175,24 @@ func outputName(in string, args []string) string {
 
 // listFormats prints what this reads and what reads it.
 //
-// ⛔ A command that converts fifteen kinds of file has to be able to SAY which
-// fifteen. The alternative is a person trying one to find out, which is how a
+// ⛔ A command that converts eighteen kinds of file has to be able to SAY which
+// eighteen. The alternative is a person trying one to find out, which is how a
 // capability that exists goes unused.
+//
+// ⛔ The columns are MEASURED rather than guessed at twenty characters. They
+// were guessed, and "OpenDocument Presentation" is twenty-five: the three
+// formats added last ran their name into the next column and the table stopped
+// lining up. A width taken from the widest row cannot go out of date when a
+// row is added, which is the only kind of layout worth having in a list that
+// grows.
 func listFormats(out interface{ Write([]byte) (int, error) }) {
+	name, suffix := 0, 0
 	for _, f := range formats {
-		fmt.Fprintf(out, "%-20s %-28s %s\n", f.Name, strings.Join(f.Suffixes, " "), f.From)
+		name = max(name, len(f.Name))
+		suffix = max(suffix, len(strings.Join(f.Suffixes, " ")))
+	}
+	for _, f := range formats {
+		fmt.Fprintf(out, "%-*s  %-*s  %s\n",
+			name, f.Name, suffix, strings.Join(f.Suffixes, " "), f.From)
 	}
 }
