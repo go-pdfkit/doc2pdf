@@ -94,6 +94,22 @@ var formats = []format{
 		return ooxml.ParsePresentation(b, opc.Limits{})
 	}, "go-ooxml/ooxml"},
 	{"OpenDocument Text", []string{".odt"}, odf.Parse, "go-odf/odf"},
+	// ⛔ THE SAME Parse, AND IT ALWAYS COULD. go-odf's own documentation says
+	// so: "A spreadsheet is the same package as a text document, inside an
+	// office:spreadsheet body instead of an office:text one, so Parse reads one
+	// too", and office:presentation and office:drawing are read the same way —
+	// each draw:page becomes a heading of its own name followed by the blocks
+	// in its shapes. Only the suffixes were missing, so a person with a .ods
+	// was told this reads nothing of the sort while the reader underneath had
+	// been reading them all along.
+	//
+	// They are separate rows rather than four suffixes on one, because what
+	// the command PRINTS is the format it decided on, and "OpenDocument
+	// Spreadsheet" is the useful thing to tell somebody whose table came out
+	// looking unexpected.
+	{"OpenDocument Spreadsheet", []string{".ods"}, odf.Parse, "go-odf/odf"},
+	{"OpenDocument Presentation", []string{".odp"}, odf.Parse, "go-odf/odf"},
+	{"OpenDocument Graphics", []string{".odg"}, odf.Parse, "go-odf/odf"},
 }
 
 // formatFor finds the reader for a file name, or says what it does read.

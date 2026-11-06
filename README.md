@@ -1,9 +1,10 @@
 # doc2pdf
 
 **Any document into a PDF.** Word, Excel, PowerPoint, OpenDocument Text,
-Markdown, reStructuredText, HTML, plain text, CSV, JSON, XML, EPUB, MOBI,
-FictionBook and email — through the [richdoc](https://github.com/go-richdoc/richdoc)
-document model and [go-pdfkit/document](https://github.com/go-pdfkit/document).
+Spreadsheet, Presentation and Graphics, Markdown, reStructuredText, HTML,
+plain text, CSV, JSON, XML, EPUB, MOBI, FictionBook and email — through the
+[richdoc](https://github.com/go-richdoc/richdoc) document model and
+[go-pdfkit/document](https://github.com/go-pdfkit/document).
 
 Pure Go, CGO-free, no TeX.
 
@@ -68,6 +69,9 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | Excel | `.xlsx` | `go-ooxml/ooxml` |
 | PowerPoint | `.pptx` | `go-ooxml/ooxml` |
 | OpenDocument Text | `.odt` | `go-odf/odf` |
+| OpenDocument Spreadsheet | `.ods` | `go-odf/odf` |
+| OpenDocument Presentation | `.odp` | `go-odf/odf` |
+| OpenDocument Graphics | `.odg` | `go-odf/odf` |
 
 ⛔ **By suffix, and it says so.** Sniffing the content would be cleverer and
 would guess wrong on the formats that share a container: `.docx`, `.xlsx`,
@@ -95,10 +99,22 @@ hyphenation and justification are the point and a six-megabyte engine is
 acceptable; reach for this one when CGO-free, `GOOS=js`-capable and keeping
 emphasis, links and tables matter more.
 
-⛔ **Ten of the fifteen formats are exercised end to end**, and the test says
-so by asserting that number against the table. EPUB, MOBI, FictionBook,
-PowerPoint and ODT need a real package built as a fixture, which is its own
-work — a known gap recorded rather than an unnoticed one.
+⛔ **Fourteen of the eighteen formats are exercised end to end**, and the test
+says so by asserting that number against the table. EPUB, MOBI, FictionBook and
+PowerPoint need a real package built as a fixture, which is its own work — a
+known gap recorded rather than an unnoticed one.
+
+ODT was on that list, with the reason *"needs a real package built"*. It did
+not: `odf.Write` builds one, exactly as `ooxml.WriteWord` does for Word. ⛔ **A
+stated gap is still a claim**, and that one had stopped being true before it was
+written down.
+
+The three OpenDocument bodies beyond text are exercised with packages built by
+hand, because `odf.Write` always produces a *text* document — a spreadsheet
+written by it and named `.ods` would be an ODT with a misleading name, and
+would pass while proving only that the reader reads ODT, which was never in
+doubt. Those three also assert that the **words reach the page**: a converter
+that wrote a valid but empty PDF would otherwise pass every other check here.
 
 ## Licence
 

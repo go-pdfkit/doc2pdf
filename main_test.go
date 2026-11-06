@@ -6,13 +6,16 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/go-odf/odf"
 	"github.com/go-ooxml/ooxml"
+	"github.com/go-pdfkit/extract"
 	"github.com/go-pdfkit/reader"
 	"github.com/go-richdoc/markdown"
 	"github.com/go-richdoc/richdoc"
@@ -67,6 +70,10 @@ func TestEveryFormatItClaimsToReadBecomesAPDF(t *testing.T) {
 		"a.eml":  []byte("From: a@example.invalid\r\nSubject: s\r\n\r\nSome prose.\r\n"),
 		"a.docx": docx(t),
 		"a.xlsx": xlsx(t),
+		"a.odt":  odt(t),
+		"a.ods":  odPackage(t, "spreadsheet", odsBody),
+		"a.odp":  odPackage(t, "presentation", odpBody),
+		"a.odg":  odPackage(t, "graphics", odgBody),
 	}
 
 	for name, body := range cases {
@@ -92,11 +99,15 @@ func TestEveryFormatItClaimsToReadBecomesAPDF(t *testing.T) {
 		})
 	}
 
-	// ⛔ The denominator. Five of the fifteen formats have no case above —
-	// EPUB, MOBI, FictionBook, PowerPoint and ODT need a real package to be
-	// built, which is its own work — and saying so here is the difference
-	// between a known gap and an unnoticed one.
-	const covered = 10
+	// ⛔ The denominator. Four of the eighteen formats have no case above —
+	// EPUB, MOBI, FictionBook and PowerPoint — and saying so here is the
+	// difference between a known gap and an unnoticed one.
+	//
+	// ODT was on that list with the reason "needs a real package to be built".
+	// It did not: odf.Write builds one, exactly as ooxml.WriteWord does for
+	// Word above. A stated gap is still a claim, and that one had stopped being
+	// true before it was written down.
+	const covered = 14
 	if len(cases) != covered {
 		t.Fatalf("%d formats are exercised; the count says %d", len(cases), covered)
 	}
@@ -133,6 +144,127 @@ func xlsx(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// odt is an OpenDocument text package, written by the library that reads it
+// back — the same shape as docx above.
+func odt(t *testing.T) []byte {
+	t.Helper()
+	b, err := odf.Write(&richdoc.Document{Blocks: []richdoc.Block{
+		richdoc.Heading{Level: 1, Inlines: []richdoc.Inline{richdoc.Text{Value: "Title"}}},
+		richdoc.Paragraph{Inlines: []richdoc.Inline{richdoc.Text{Value: "Some prose."}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// odPackage builds a minimal OpenDocument package of one of the other three
+// bodies.
+//
+// ⛔ BUILT BY HAND, because odf.Write always produces a TEXT document — the
+// package says so. A spreadsheet written as an .ods by this test would
+// therefore be an ODT with a misleading name, and it would pass while proving
+// that the reader can read ODT, which was never in doubt. The container is the
+// one the OpenDocument packaging specification describes: the mimetype entry
+// first and STORED rather than deflated.
+func odPackage(t *testing.T, kind, body string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	z := zip.NewWriter(&buf)
+	mt, err := z.CreateHeader(&zip.FileHeader{Name: "mimetype", Method: zip.Store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mt.Write([]byte("application/vnd.oasis.opendocument." + kind)); err != nil {
+		t.Fatal(err)
+	}
+	c, err := z.Create("content.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+const odNS = `xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ` +
+	`xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" ` +
+	`xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" ` +
+	`xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"`
+
+const odsBody = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content ` + odNS + ` office:version="1.3"><office:body><office:spreadsheet>
+<table:table table:name="Sheet1">
+<table:table-row><table:table-cell><text:p>one</text:p></table:table-cell>
+<table:table-cell><text:p>two</text:p></table:table-cell></table:table-row>
+</table:table>
+</office:spreadsheet></office:body></office:document-content>`
+
+const odpBody = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content ` + odNS + ` office:version="1.3"><office:body><office:presentation>
+<draw:page draw:name="Slide one">
+<draw:frame><draw:text-box><text:p>Some prose on a slide.</text:p></draw:text-box></draw:frame>
+</draw:page>
+</office:presentation></office:body></office:document-content>`
+
+const odgBody = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content ` + odNS + ` office:version="1.3"><office:body><office:drawing>
+<draw:page draw:name="Page one">
+<draw:frame><draw:text-box><text:p>Words in a shape.</text:p></draw:text-box></draw:frame>
+</draw:page>
+</office:drawing></office:body></office:document-content>`
+
+// ⛔ And what comes out CARRIES THE WORDS. A converter that writes a valid but
+// empty PDF passes every test above: the file opens, the command says which
+// library read it, and nothing is in it. The spreadsheet's cells and the
+// slide's text are the point of the conversion.
+func TestTheOpenDocumentBodiesReachThePage(t *testing.T) {
+	for _, c := range []struct {
+		name, body, want string
+	}{
+		{"a.ods", odsBody, "one"},
+		{"a.odp", odpBody, "Some prose on a slide."},
+		{"a.odg", odgBody, "Words in a shape."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			kind := map[string]string{
+				"a.ods": "spreadsheet", "a.odp": "presentation", "a.odg": "graphics",
+			}[c.name]
+			in := write(t, c.name, odPackage(t, kind, c.body))
+			if code, out, errOut := drive(t, in); code != 0 {
+				t.Fatalf("code %d: %s%s", code, out, errOut)
+			}
+			pdf, err := os.ReadFile(strings.TrimSuffix(in, filepath.Ext(in)) + ".pdf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := reader.Open(pdf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runs, err := extract.Runs(src, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var said strings.Builder
+			for _, r := range runs {
+				said.WriteString(r.Text)
+			}
+			// Compared with the spaces taken out of both: how a page breaks a
+			// line into runs is the layout's business, and this is asking
+			// whether the words got there at all.
+			flat := strings.ReplaceAll(said.String(), " ", "")
+			if !strings.Contains(flat, strings.ReplaceAll(c.want, " ", "")) {
+				t.Errorf("the page does not carry %q; it reads %q", c.want, said.String())
+			}
+		})
+	}
 }
 
 func TestTheOutputNameDefaultsToTheInputWithPDF(t *testing.T) {
