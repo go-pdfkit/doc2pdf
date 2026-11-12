@@ -44,8 +44,8 @@ github.com/go-opentype/opentype v0.18.0 h1:kxYj8r6on63QwPML6Y41xGrSH7A9ap9tKWioI
 github.com/go-opentype/opentype v0.18.0/go.mod h1:cyTZyPcwVFR4MTHnCj7a6tk2tGIB6deakpefu/apDjg=
 github.com/go-pdfkit/document v0.2.0 h1:4cdQLl4bcF0CxEw5eeZtkSGVimwgkR8jTMg5TKUEy6s=
 github.com/go-pdfkit/document v0.2.0/go.mod h1:Lgxm8Na/Nn2EI8Gmh+lpHhcPLwddOTG32GyL4GLki/c=
-github.com/go-pdfkit/extract v0.9.0 h1:gmyIFqZBxBBx6ccpUbF0Sw67jUmAp7q9vQ8mEsTyuFA=
-github.com/go-pdfkit/extract v0.9.0/go.mod h1:pUzGzNMx0WTsBOzfZ2XKT5ewqgv8cP/I6WpU4isPsmc=
+github.com/go-pdfkit/extract v0.11.0 h1:qc1/sahrW/AWDL75GjE9qUyoY6jSuhq5th7lGQKG2IY=
+github.com/go-pdfkit/extract v0.11.0/go.mod h1:MNOx6Y0g//XSSx0lztuLUPDy4y5yubaNVsxJkVq3F6k=
 github.com/go-pdfkit/html2pdf v0.4.1 h1:zZ1sEoG6c3iJoEX4itG2Lul5z0BtyZ51lutzR4MC96M=
 github.com/go-pdfkit/html2pdf v0.4.1/go.mod h1:jUmx2Gj/ctKPvCSJUJjZnY3NaC3OvPUGNAvzAES8jvk=
 github.com/go-pdfkit/pdffont v0.4.0 h1:3CV2HnmUGHiIYuZ5dJWRLKvi7hMHGWS1RjgNYkEZ0Gk=
