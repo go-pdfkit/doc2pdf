@@ -1,6 +1,6 @@
 module github.com/go-pdfkit/doc2pdf
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/go-odf/odf v0.11.0
@@ -8,16 +8,16 @@ require (
 	github.com/go-ooxml/opc v0.2.1
 	github.com/go-pdfkit/document v0.2.0
 	github.com/go-pdfkit/extract v0.11.0
-	github.com/go-pdfkit/reader v0.10.0
-	github.com/go-richdoc/data v0.4.0
-	github.com/go-richdoc/email v0.3.0
-	github.com/go-richdoc/epub v0.4.0
-	github.com/go-richdoc/fb2 v0.2.0
-	github.com/go-richdoc/html v0.4.1
-	github.com/go-richdoc/markdown v0.12.0
-	github.com/go-richdoc/mobi v0.3.0
-	github.com/go-richdoc/richdoc v0.9.0
-	github.com/go-richdoc/rst v0.14.0
+	github.com/go-pdfkit/reader v0.11.0
+	github.com/go-richdoc/data v0.5.0
+	github.com/go-richdoc/email v0.4.0
+	github.com/go-richdoc/epub v0.5.0
+	github.com/go-richdoc/fb2 v0.3.0
+	github.com/go-richdoc/html v0.5.0
+	github.com/go-richdoc/markdown v0.13.0
+	github.com/go-richdoc/mobi v0.4.0
+	github.com/go-richdoc/richdoc v0.10.0
+	github.com/go-richdoc/rst v0.15.0
 	github.com/spf13/cobra v1.10.2
 )
 
@@ -38,7 +38,7 @@ require (
 	github.com/go-images/jpeg2000 v0.14.0 // indirect
 	github.com/go-images/png v0.2.0 // indirect
 	github.com/go-opentype/fonts v0.14.0 // indirect
-	github.com/go-opentype/opentype v0.18.0 // indirect
+	github.com/go-opentype/opentype v0.20.0 // indirect
 	github.com/go-pdfkit/html2pdf v0.4.1 // indirect
 	github.com/go-pdfkit/pdffont v0.4.0 // indirect
 	github.com/go-pdfkit/pdfkit v0.20.0 // indirect
@@ -59,5 +59,5 @@ require (
 	golang.org/x/image v0.47.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 )
