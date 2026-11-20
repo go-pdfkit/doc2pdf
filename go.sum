@@ -52,8 +52,8 @@ github.com/go-pdfkit/pdffont v0.4.0 h1:3CV2HnmUGHiIYuZ5dJWRLKvi7hMHGWS1RjgNYkEZ0
 github.com/go-pdfkit/pdffont v0.4.0/go.mod h1:l7es3IPbKewQF+sSgPh/bQL18jSewoI0cMjttk7uPlc=
 github.com/go-pdfkit/pdfkit v0.20.0 h1:AvIGB6abZEqeUlzXXweplAfdtSdmHjpo7GsgEMUm6wg=
 github.com/go-pdfkit/pdfkit v0.20.0/go.mod h1:qiVyvQ/GJ2l4qb2OpWfnA7nwaZe5WedcdJCzQRkCYlA=
-github.com/go-pdfkit/reader v0.17.0 h1:17MUgAowqA5G6KJQxOpLSyEgy3qeITkBRgFYA1hbRHQ=
-github.com/go-pdfkit/reader v0.17.0/go.mod h1:EYHHREPKT/orDzlGiFPnPVPPuaRDLiAYezIr0cCFXaA=
+github.com/go-pdfkit/reader v0.19.1 h1:D0lPFwUbTLsqQPZluKX7ghqgIPaHLOhf/HRAYsWEHog=
+github.com/go-pdfkit/reader v0.19.1/go.mod h1:EYHHREPKT/orDzlGiFPnPVPPuaRDLiAYezIr0cCFXaA=
 github.com/go-richdoc/data v0.5.0 h1:67OpOt5RXE3WNs4NfmCav+fN8uXuDwt9ZTmYjDmHVE4=
 github.com/go-richdoc/data v0.5.0/go.mod h1:yQaVKGs4d+4DMrGV7CzfO9SHCe3RtNFmq1I4huPkchc=
 github.com/go-richdoc/email v0.4.0 h1:VdmhUPj6QqGyfTFvn9sQ1Wwsy9Ui/aIA60MUtYLL2Bo=
