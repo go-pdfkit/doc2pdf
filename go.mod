@@ -8,7 +8,7 @@ require (
 	github.com/go-ooxml/opc v0.2.1
 	github.com/go-pdfkit/document v0.2.0
 	github.com/go-pdfkit/extract v0.11.0
-	github.com/go-pdfkit/reader v0.19.1
+	github.com/go-pdfkit/reader v0.20.0
 	github.com/go-richdoc/data v0.5.0
 	github.com/go-richdoc/email v0.4.0
 	github.com/go-richdoc/epub v0.5.0
