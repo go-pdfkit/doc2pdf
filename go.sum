@@ -72,8 +72,8 @@ github.com/go-richdoc/richdoc v0.10.0 h1:+BsIDF1iX1QNzk96uMX6VbsVmiGwXoabFdBkI+0
 github.com/go-richdoc/richdoc v0.10.0/go.mod h1:zZIyjS9RnUk0qC9kz1cTZsQHdbBZlKSMXWsTZOEeowc=
 github.com/go-richdoc/rst v0.15.0 h1:Py9mQYTxxeTTaGDlykeB9VweSWG8OiPTrefUcZraCnU=
 github.com/go-richdoc/rst v0.15.0/go.mod h1:qt/QYdfd2dEpd23xebAOt+ejp81Y1OvdpRihKdJwAd0=
-github.com/go-richdoc/rtf v0.1.1 h1:9kHGEVrd+7aFzfbaUKiIa23bNXHssWcjCbSdaTYfVyI=
-github.com/go-richdoc/rtf v0.1.1/go.mod h1:44G+DkImkuyAWE/I2ZAHPU/vhGiuOquVsAuzG/0NcUk=
+github.com/go-richdoc/rtf v0.1.2 h1:gRCpitfj/K+vpb5SH4elFp/6ZzqYt7DnzJpskTw0kEo=
+github.com/go-richdoc/rtf v0.1.2/go.mod h1:44G+DkImkuyAWE/I2ZAHPU/vhGiuOquVsAuzG/0NcUk=
 github.com/go-simd/highway v0.0.14 h1:O3HPG00qgLGlrQyYBlMGyLYsuzZrqHA4+XNptPjV5gs=
 github.com/go-simd/highway v0.0.14/go.mod h1:t5XBPxqa10Lnj0frQS7Ur0JaN+/CckEmm5HXrqBDxXA=
 github.com/go-sourcemap/sourcemap v2.1.4+incompatible h1:a+iTbH5auLKxaNwQFg0B+TCYl6lbukKPc7b5x0n1s6Q=

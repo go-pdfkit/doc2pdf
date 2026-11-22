@@ -119,6 +119,31 @@ func TestEveryFormatItClaimsToReadBecomesAPDF(t *testing.T) {
 	t.Logf("%d of %d formats are exercised end to end", covered, len(formats))
 }
 
+// ⛔ A hostile .rtf is REFUSED, not converted. rtf v0.1.2 bounds what a file can
+// make Parse allocate (16 MiB input, 1 Mi nodes, \bin checked against the input
+// that remains); v0.1.0 and v0.1.1 had no such bound. A converter that only
+// proves a sample converts would pass on those too.
+func TestHostileRTFIsRefused(t *testing.T) {
+	cases := map[string][]byte{
+		// A few bytes of input per node: 2 Mi paragraphs against a limit of 1 Mi.
+		"nodes.rtf": []byte(`{\rtf1` + strings.Repeat(`a\par `, 2<<20) + `}`),
+		// A six-byte control word naming two gigabytes that are not there.
+		"bin.rtf": []byte(`{\rtf1{\pict\pngblip\bin2000000000 x}}`),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := write(t, name, body)
+			code, out, errOut := drive(t, in)
+			if code == 0 {
+				t.Fatalf("a hostile file was converted: %s%s", out, errOut)
+			}
+			if _, err := os.Stat(strings.TrimSuffix(in, ".rtf") + ".pdf"); err == nil {
+				t.Fatal("a PDF was written for a refused file")
+			}
+		})
+	}
+}
+
 // docx is a Word package, written by the library that reads it back.
 func docx(t *testing.T) []byte {
 	t.Helper()
