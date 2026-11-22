@@ -74,6 +74,14 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | OpenDocument Presentation | `.odp` | `go-odf/odf` |
 | OpenDocument Graphics | `.odg` | `go-odf/odf` |
 
+**What RTF conversion keeps.** Structure: headings, lists, tables, hyperlinks
+(http, https, mailto), footnotes, PNG and JPEG pictures, bold, italic, strike,
+and paragraph alignment (as the classes `align-center`, `align-right`,
+`align-justify`). It does not keep font sizes, colours, underline, fonts,
+indents, headers and footers, or WMF and EMF pictures: the richdoc model has no
+place for them. See the
+[go-richdoc/rtf README](https://github.com/go-richdoc/rtf#what-it-cannot-carry).
+
 ⛔ **By suffix, and it says so.** Sniffing the content would be cleverer and
 would guess wrong on the formats that share a container: `.docx`, `.xlsx`,
 `.pptx`, `.odt` and `.epub` are all ZIP files, and telling them apart means
