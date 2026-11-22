@@ -30,7 +30,12 @@
 package main
 
 import (
+	"crypto/rand"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +74,7 @@ Exit status: 0 it was written, 1 it was not, 2 a usage error.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			o.maxInputSet = cmd.Flags().Changed("max-input")
 			return fromStatus(run(cmd.OutOrStdout(), cmd.ErrOrStderr(), o, args))
 		},
 	}
@@ -76,13 +82,18 @@ Exit status: 0 it was written, 1 it was not, 2 a usage error.`,
 	f.BoolVar(&o.list, "list", false, "print the formats this reads, and what reads them")
 	f.BoolVarP(&o.force, "force", "f", false, "overwrite the output if it is already there")
 	f.Float64Var(&o.marginMm, "margin", 20, "the margin on every side, in millimetres")
+	f.Int64Var(&o.maxInput, "max-input", 0, "the largest input to read, in bytes (default: 16 MiB for RTF, 256 MiB otherwise)")
 	return c
 }
 
 type options struct {
-	list     bool
-	force    bool
-	marginMm float64
+	maxInput int64
+	// maxInputSet is whether --max-input was given at all, so that an explicit
+	// 0 is refused rather than read as "the default".
+	maxInputSet bool
+	list        bool
+	force       bool
+	marginMm    float64
 }
 
 // fromStatus turns an exit code into the error cobra wants, so that main has
@@ -111,13 +122,21 @@ func run(out, errOut interface {
 		return 2
 	}
 
+	// ⛔ A limit of 0 or less, or of MaxInt64 (where limit+1 wraps and nothing
+	// is read, which then looks like an empty document), is a usage error.
+	if o.maxInputSet && (o.maxInput <= 0 || o.maxInput >= math.MaxInt64) {
+		fmt.Fprintf(errOut, "doc2pdf: --max-input must be between 1 and %d bytes, not %d\n",
+			int64(math.MaxInt64-1), o.maxInput)
+		return 2
+	}
+
 	in := args[0]
 	f, err := formatFor(in)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 2
 	}
-	src, err := os.ReadFile(in)
+	src, err := readBounded(in, f, o.maxInput)
 	if err != nil {
 		fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 		return 1
@@ -143,14 +162,12 @@ func run(out, errOut interface {
 	}
 
 	dst := outputName(in, args)
-	if !o.force {
-		if _, err := os.Stat(dst); err == nil {
+	if err := writeAtomic(dst, pdf, o.force); err != nil {
+		if errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(errOut, "doc2pdf: %s is already there; -f overwrites it\n", dst)
-			return 1
+		} else {
+			fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 		}
-	}
-	if err := os.WriteFile(dst, pdf, 0o644); err != nil {
-		fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 		return 1
 	}
 
@@ -163,6 +180,103 @@ func run(out, errOut interface {
 		fmt.Fprintf(out, "  not fetched: %s\n", u)
 	}
 	return 0
+}
+
+// readBounded reads a file of at most the format's limit (or override, when
+// positive), refusing BEFORE reading when the file is already larger, and
+// never reading more than the limit plus one byte whatever the file turns into.
+func readBounded(path string, f format, override int64) ([]byte, error) {
+	limit := f.MaxInput()
+	if override > 0 {
+		limit = override
+	}
+	refuse := func(size int64) error {
+		return fmt.Errorf("%s is %d bytes, over the %d-byte limit for %s; -max-input raises it",
+			path, size, limit, f.Name)
+	}
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	// A Stat that fails is not a reason to refuse: the read below is bounded
+	// on its own.
+	if st, err := fh.Stat(); err == nil && st.Mode().IsRegular() && st.Size() > limit {
+		return nil, refuse(st.Size())
+	}
+	b, err := io.ReadAll(io.LimitReader(fh, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, refuse(int64(len(b)))
+	}
+	return b, nil
+}
+
+// writeTemp fills the temporary file. It is a variable only so that a test can
+// make the write fail part-way, which a disk does when it is full.
+var writeTemp = func(f *os.File, b []byte) error {
+	_, err := f.Write(b)
+	return err
+}
+
+// writeAtomic writes beside dst and publishes it, so a failed write leaves
+// either the old file or none, never a partial PDF. With force the file is
+// renamed over dst; without, it is linked, which refuses an existing dst
+// (fs.ErrExist) even if it appeared a moment ago. The temporary name never
+// outlives the call.
+func writeAtomic(dst string, b []byte, force bool) error {
+	// The name is made BEFORE the file is opened, so nothing below needs the
+	// file to find it. crypto/rand.Text cannot fail.
+	name := filepath.Join(filepath.Dir(dst), ".doc2pdf-"+rand.Text()+".tmp")
+	tmp, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(name)
+	err = writeTemp(tmp, b)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if force {
+		return os.Rename(name, dst)
+	}
+	// A hard link fails if dst exists, where a rename would replace a file
+	// somebody created since the caller looked.
+	err = linkFile(name, dst)
+	if err == nil || errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	// ⛔ No hard links here (FAT, exFAT, some SMB). Not a Stat and a Rename,
+	// which would reopen the race: create dst with O_EXCL, which refuses an
+	// existing one atomically, and write into it.
+	return createExclusive(dst, b)
+}
+
+// linkFile is os.Link; a variable only so that a test can say the file system
+// has no hard links.
+var linkFile = os.Link
+
+// createExclusive writes b into a dst it creates, refusing one that exists. A
+// failure removes dst again: O_EXCL proves this call made it, so what is
+// removed is never somebody else's file.
+func createExclusive(dst string, b []byte) error {
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	err = writeTemp(f, b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(dst)
+	}
+	return err
 }
 
 // outputName is the second argument, or the input with a .pdf suffix.

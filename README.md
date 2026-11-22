@@ -64,6 +64,7 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | EPUB | `.epub` | `go-richdoc/epub` |
 | MOBI | `.mobi` `.azw` `.azw3` | `go-richdoc/mobi` |
 | FictionBook | `.fb2` | `go-richdoc/fb2` |
+| RTF | `.rtf` | `go-richdoc/rtf` |
 | email | `.eml` `.mbox` | `go-richdoc/email` |
 | Word | `.docx` | `go-ooxml/ooxml` |
 | Excel | `.xlsx` | `go-ooxml/ooxml` |
@@ -72,6 +73,14 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | OpenDocument Spreadsheet | `.ods` | `go-odf/odf` |
 | OpenDocument Presentation | `.odp` | `go-odf/odf` |
 | OpenDocument Graphics | `.odg` | `go-odf/odf` |
+
+**What RTF conversion keeps.** Structure: headings, lists, tables, hyperlinks
+(http, https, mailto), footnotes, PNG and JPEG pictures, bold, italic, strike,
+and paragraph alignment (as the classes `align-center`, `align-right`,
+`align-justify`). It does not keep font sizes, colours, underline, fonts,
+indents, headers and footers, or WMF and EMF pictures: the richdoc model has no
+place for them. See the
+[go-richdoc/rtf README](https://github.com/go-richdoc/rtf#what-it-cannot-carry).
 
 ⛔ **By suffix, and it says so.** Sniffing the content would be cleverer and
 would guess wrong on the formats that share a container: `.docx`, `.xlsx`,
@@ -87,6 +96,24 @@ than silently reading the file as something else.
 doc2pdf: go-ooxml/ooxml could not read this Word: …
 ```
 
+⛔ **The input is bounded before it is read.** The file's size is checked first
+and a larger one is refused without reading it, because the readers bound what
+they allocate only once the file is in memory. The limit is 16 MiB for RTF (the
+default of `go-richdoc/rtf` v0.1.2, whose worst case is then about 80 times the
+input) and 256 MiB for every other format. `--max-input BYTES` replaces it (from 1 up to 9223372036854775806; anything else
+is a usage error, exit 2):
+
+```
+doc2pdf: big.rtf is 20000000 bytes, over the 16777216-byte limit for RTF; -max-input raises it
+```
+
+The PDF is written to a temporary file beside the output and then published:
+renamed over the output with `-f`, and hard-linked without it, which fails if
+the output exists even if it appeared a moment ago. A failed write never leaves
+a partial file. Where the file system has no hard links (FAT, exFAT, some SMB),
+the output is created with an exclusive open instead, which refuses an existing
+file just as atomically.
+
 ## What it cannot do
 
 It inherits `go-pdfkit/html2pdf`: no JavaScript, no `@font-face`, no CSS
@@ -99,7 +126,7 @@ hyphenation and justification are the point and a six-megabyte engine is
 acceptable; reach for this one when CGO-free, `GOOS=js`-capable and keeping
 emphasis, links and tables matter more.
 
-⛔ **Fourteen of the eighteen formats are exercised end to end**, and the test
+⛔ **Fifteen of the nineteen formats are exercised end to end**, and the test
 says so by asserting that number against the table. EPUB, MOBI, FictionBook and
 PowerPoint need a real package built as a fixture, which is its own work — a
 known gap recorded rather than an unnoticed one.
