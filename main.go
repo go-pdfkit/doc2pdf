@@ -30,6 +30,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
 	"os"
@@ -203,17 +204,16 @@ func readBounded(path string, f format, override int64) ([]byte, error) {
 // writeAtomic writes beside dst and renames, so a failed write leaves either
 // the old file or none, never a partial PDF.
 func writeAtomic(dst string, b []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".doc2pdf-*.tmp")
+	// The name is made BEFORE the file is opened, so nothing below needs the
+	// file to find it. crypto/rand.Text cannot fail.
+	name := filepath.Join(filepath.Dir(dst), ".doc2pdf-"+rand.Text()+".tmp")
+	tmp, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
-	name := tmp.Name()
 	_, err = tmp.Write(b)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(name, 0o644)
 	}
 	if err == nil {
 		err = os.Rename(name, dst)
