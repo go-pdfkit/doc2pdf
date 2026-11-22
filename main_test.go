@@ -137,10 +137,80 @@ func TestHostileRTFIsRefused(t *testing.T) {
 			if code == 0 {
 				t.Fatalf("a hostile file was converted: %s%s", out, errOut)
 			}
+			if !strings.Contains(errOut, "rtf could not read") && !strings.Contains(errOut, "go-richdoc/rtf could not read") ||
+				!strings.Contains(errOut, "rtf: ") {
+				t.Errorf("the refusal does not say rtf refused it: %q", errOut)
+			}
 			if _, err := os.Stat(strings.TrimSuffix(in, ".rtf") + ".pdf"); err == nil {
 				t.Fatal("a PDF was written for a refused file")
 			}
 		})
+	}
+}
+
+// ⛔ An oversized input is refused from its SIZE, before one byte is read: the
+// file is sparse (Truncate writes nothing), so a reader that buffered it first
+// would allocate 16 MiB here and, on a real 10 GB file, the whole of it.
+func TestOversizedInputIsRefusedUnread(t *testing.T) {
+	in := write(t, "big.rtf", nil)
+	if err := os.Truncate(in, rtfDefaultMaxInput+1); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := drive(t, in)
+	if code != 1 {
+		t.Fatalf("code %d: %s%s", code, out, errOut)
+	}
+	for _, want := range []string{"16777217 bytes", "16777216-byte limit", "RTF", "-max-input"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("%q is missing from %q", want, errOut)
+		}
+	}
+	if _, err := os.Stat(strings.TrimSuffix(in, ".rtf") + ".pdf"); err == nil {
+		t.Fatal("a PDF was written for a refused file")
+	}
+}
+
+// The flag lowers the limit for any format, and raises it for RTF (which then
+// passes the larger limit on to the reader).
+func TestMaxInputFlag(t *testing.T) {
+	in := write(t, "a.md", []byte("# Title\n\nSome prose.\n"))
+	code, _, errOut := drive(t, "--max-input", "5", in)
+	if code != 1 || !strings.Contains(errOut, "5-byte limit") || !strings.Contains(errOut, "Markdown") {
+		t.Fatalf("code %d: %q", code, errOut)
+	}
+	code, out, errOut := drive(t, "--max-input", "1000000", in)
+	if code != 0 {
+		t.Fatalf("code %d: %s%s", code, out, errOut)
+	}
+
+	// 17 MiB of RTF paragraph-free text: over rtf's default, under the flag.
+	big := []byte(`{\rtf1 a}` + strings.Repeat("\n", 17<<20))
+	rtfIn := write(t, "big.rtf", big)
+	code, out, errOut = drive(t, "--max-input", "20000000", rtfIn)
+	if code != 0 {
+		t.Fatalf("a raised limit did not reach rtf: %d %s%s", code, out, errOut)
+	}
+}
+
+// A failed or forced write leaves no temporary file, and -f replaces the old.
+func TestWriteAtomicLeavesNoTemporary(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "o.pdf")
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAtomic(dst, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "new" {
+		t.Fatalf("got %q", b)
+	}
+	if err := writeAtomic(filepath.Join(dir, "missing", "o.pdf"), []byte("x")); err == nil {
+		t.Fatal("a write into a missing directory succeeded")
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 1 {
+		t.Fatalf("temporary files left behind: %v", ents)
 	}
 }
 

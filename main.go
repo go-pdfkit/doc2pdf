@@ -31,6 +31,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,10 +77,12 @@ Exit status: 0 it was written, 1 it was not, 2 a usage error.`,
 	f.BoolVar(&o.list, "list", false, "print the formats this reads, and what reads them")
 	f.BoolVarP(&o.force, "force", "f", false, "overwrite the output if it is already there")
 	f.Float64Var(&o.marginMm, "margin", 20, "the margin on every side, in millimetres")
+	f.Int64Var(&o.maxInput, "max-input", 0, "the largest input to read, in bytes (default: 16 MiB for RTF, 256 MiB otherwise)")
 	return c
 }
 
 type options struct {
+	maxInput int64
 	list     bool
 	force    bool
 	marginMm float64
@@ -117,7 +120,7 @@ func run(out, errOut interface {
 		fmt.Fprintln(errOut, err)
 		return 2
 	}
-	src, err := os.ReadFile(in)
+	src, err := readBounded(in, f, o.maxInput)
 	if err != nil {
 		fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 		return 1
@@ -149,7 +152,7 @@ func run(out, errOut interface {
 			return 1
 		}
 	}
-	if err := os.WriteFile(dst, pdf, 0o644); err != nil {
+	if err := writeAtomic(dst, pdf); err != nil {
 		fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 		return 1
 	}
@@ -163,6 +166,64 @@ func run(out, errOut interface {
 		fmt.Fprintf(out, "  not fetched: %s\n", u)
 	}
 	return 0
+}
+
+// readBounded reads a file of at most the format's limit (or override, when
+// positive), refusing BEFORE reading when the file is already larger, and
+// never reading more than the limit plus one byte whatever the file turns into.
+func readBounded(path string, f format, override int64) ([]byte, error) {
+	limit := f.MaxInput()
+	if override > 0 {
+		limit = override
+	}
+	refuse := func(size int64) error {
+		return fmt.Errorf("%s is %d bytes, over the %d-byte limit for %s; -max-input raises it",
+			path, size, limit, f.Name)
+	}
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	st, err := fh.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if st.Mode().IsRegular() && st.Size() > limit {
+		return nil, refuse(st.Size())
+	}
+	b, err := io.ReadAll(io.LimitReader(fh, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, refuse(int64(len(b)))
+	}
+	return b, nil
+}
+
+// writeAtomic writes beside dst and renames, so a failed write leaves either
+// the old file or none, never a partial PDF.
+func writeAtomic(dst string, b []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".doc2pdf-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	_, err = tmp.Write(b)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(name, 0o644)
+	}
+	if err == nil {
+		err = os.Rename(name, dst)
+	}
+	if err != nil {
+		os.Remove(name)
+	}
+	return err
 }
 
 // outputName is the second argument, or the input with a .pdf suffix.

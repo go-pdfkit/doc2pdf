@@ -83,7 +83,10 @@ var formats = []format{
 		return fb2.Parse(b, fb2.Limits{})
 	}, "go-richdoc/fb2"},
 	{"RTF", []string{".rtf"}, func(b []byte) (*richdoc.Document, error) {
-		return rtf.Parse(b, rtf.Limits{})
+		// rtf refuses a source over its own MaxInput, so the one this command
+		// accepted (-max-input may have raised it) is passed on, never less than
+		// rtf's default.
+		return rtf.Parse(b, rtf.Limits{MaxInput: max(len(b), rtfDefaultMaxInput)})
 	}, "go-richdoc/rtf"},
 	{"email", []string{".eml", ".mbox"}, func(b []byte) (*richdoc.Document, error) {
 		return email.Parse(b, email.Limits{})
@@ -114,6 +117,29 @@ var formats = []format{
 	{"OpenDocument Spreadsheet", []string{".ods"}, odf.Parse, "go-odf/odf"},
 	{"OpenDocument Presentation", []string{".odp"}, odf.Parse, "go-odf/odf"},
 	{"OpenDocument Graphics", []string{".odg"}, odf.Parse, "go-odf/odf"},
+}
+
+// rtfDefaultMaxInput is go-richdoc/rtf v0.1.2's default MaxInput (16 MiB). The
+// package exports no constant for it; the value is stated in its Limits
+// documentation, and it bounds the worst case at about 1.25 GiB of allocation.
+const rtfDefaultMaxInput = 16 << 20
+
+// defaultMaxInput is the largest file read for any format without its own
+// entry in formatMaxInput. The readers bound what they ALLOCATE, but only after
+// the file is in memory, so this bounds the file itself.
+const defaultMaxInput = 256 << 20
+
+// formatMaxInput holds the formats whose limit differs from defaultMaxInput.
+var formatMaxInput = map[string]int64{
+	"RTF": rtfDefaultMaxInput,
+}
+
+// MaxInput is the largest file, in bytes, this format is read from.
+func (f format) MaxInput() int64 {
+	if n, ok := formatMaxInput[f.Name]; ok {
+		return n
+	}
+	return defaultMaxInput
 }
 
 // formatFor finds the reader for a file name, or says what it does read.

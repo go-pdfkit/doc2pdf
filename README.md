@@ -96,6 +96,19 @@ than silently reading the file as something else.
 doc2pdf: go-ooxml/ooxml could not read this Word: …
 ```
 
+⛔ **The input is bounded before it is read.** The file's size is checked first
+and a larger one is refused without reading it, because the readers bound what
+they allocate only once the file is in memory. The limit is 16 MiB for RTF (the
+default of `go-richdoc/rtf` v0.1.2, whose worst case is then about 80 times the
+input) and 256 MiB for every other format. `--max-input BYTES` replaces it:
+
+```
+doc2pdf: big.rtf is 20000000 bytes, over the 16777216-byte limit for RTF; -max-input raises it
+```
+
+The PDF is written to a temporary file beside the output and renamed, so a
+failed write, or `-f`, never leaves a partial file.
+
 ## What it cannot do
 
 It inherits `go-pdfkit/html2pdf`: no JavaScript, no `@font-face`, no CSS
