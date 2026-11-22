@@ -18,6 +18,7 @@ require (
 	github.com/go-richdoc/mobi v0.4.0
 	github.com/go-richdoc/richdoc v0.10.0
 	github.com/go-richdoc/rst v0.15.0
+	github.com/go-richdoc/rtf v0.1.0
 	github.com/spf13/cobra v1.10.2
 )
 

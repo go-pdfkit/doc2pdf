@@ -64,6 +64,7 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | EPUB | `.epub` | `go-richdoc/epub` |
 | MOBI | `.mobi` `.azw` `.azw3` | `go-richdoc/mobi` |
 | FictionBook | `.fb2` | `go-richdoc/fb2` |
+| RTF | `.rtf` | `go-richdoc/rtf` |
 | email | `.eml` `.mbox` | `go-richdoc/email` |
 | Word | `.docx` | `go-ooxml/ooxml` |
 | Excel | `.xlsx` | `go-ooxml/ooxml` |
@@ -99,7 +100,7 @@ hyphenation and justification are the point and a six-megabyte engine is
 acceptable; reach for this one when CGO-free, `GOOS=js`-capable and keeping
 emphasis, links and tables matter more.
 
-⛔ **Fourteen of the eighteen formats are exercised end to end**, and the test
+⛔ **Fifteen of the nineteen formats are exercised end to end**, and the test
 says so by asserting that number against the table. EPUB, MOBI, FictionBook and
 PowerPoint need a real package built as a fixture, which is its own work — a
 known gap recorded rather than an unnoticed one.

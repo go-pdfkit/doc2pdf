@@ -25,6 +25,7 @@ import (
 	"github.com/go-richdoc/mobi"
 	"github.com/go-richdoc/richdoc"
 	"github.com/go-richdoc/rst"
+	"github.com/go-richdoc/rtf"
 )
 
 // A format is one kind of file this can read, by the suffixes it is written
@@ -81,6 +82,9 @@ var formats = []format{
 	{"FictionBook", []string{".fb2"}, func(b []byte) (*richdoc.Document, error) {
 		return fb2.Parse(b, fb2.Limits{})
 	}, "go-richdoc/fb2"},
+	{"RTF", []string{".rtf"}, func(b []byte) (*richdoc.Document, error) {
+		return rtf.Parse(b, rtf.Limits{})
+	}, "go-richdoc/rtf"},
 	{"email", []string{".eml", ".mbox"}, func(b []byte) (*richdoc.Document, error) {
 		return email.Parse(b, email.Limits{})
 	}, "go-richdoc/email"},

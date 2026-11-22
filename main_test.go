@@ -67,6 +67,7 @@ func TestEveryFormatItClaimsToReadBecomesAPDF(t *testing.T) {
 		"a.csv":  []byte("one,two\n1,2\n"),
 		"a.json": []byte(`{"one": 1, "two": "2"}`),
 		"a.xml":  []byte(`<r><a>1</a><b>2</b></r>`),
+		"a.rtf":  []byte(`{\rtf1\ansi{\fonttbl{\f0 Times;}}\pard\outlinelvl0 Title\par\pard Some {\b prose}.\par}`),
 		"a.eml":  []byte("From: a@example.invalid\r\nSubject: s\r\n\r\nSome prose.\r\n"),
 		"a.docx": docx(t),
 		"a.xlsx": xlsx(t),
@@ -107,7 +108,7 @@ func TestEveryFormatItClaimsToReadBecomesAPDF(t *testing.T) {
 	// It did not: odf.Write builds one, exactly as ooxml.WriteWord does for
 	// Word above. A stated gap is still a claim, and that one had stopped being
 	// true before it was written down.
-	const covered = 14
+	const covered = 15
 	if len(cases) != covered {
 		t.Fatalf("%d formats are exercised; the count says %d", len(cases), covered)
 	}
