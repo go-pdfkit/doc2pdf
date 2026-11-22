@@ -205,7 +205,7 @@ func TestReadAndWriteFailuresAreReported(t *testing.T) {
 	}
 
 	// A missing file, and a directory (opens, cannot be read).
-	if code, _, e := drive(t, filepath.Join(t.TempDir(), "none.md")); code != 1 || !strings.Contains(e, "doc2pdf:") {
+	if code, _, e := drive(t, filepath.Join(t.TempDir(), "none.md")); code != 1 || !strings.Contains(e, "no such file") {
 		t.Errorf("missing: %d %q", code, e)
 	}
 	dir := filepath.Join(t.TempDir(), "d.md")
