@@ -232,6 +232,31 @@ func TestReadAndWriteFailuresAreReported(t *testing.T) {
 	}
 }
 
+// The temporary file cannot be created: the command reports it, exits 1, and
+// writes nothing. A read-only directory is how that happens; root ignores the
+// mode, so the test cannot say anything there.
+func TestUnwritableOutputDirectoryIsReported(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only directory")
+	}
+	ro := filepath.Join(t.TempDir(), "ro")
+	if err := os.Mkdir(ro, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(ro, 0o755) })
+	in := write(t, "a.md", []byte("# T\n"))
+	code, out, errOut := drive(t, in, filepath.Join(ro, "o.pdf"))
+	if code != 1 || !strings.Contains(errOut, "permission denied") || out != "" {
+		t.Fatalf("code %d, out %q, err %q", code, out, errOut)
+	}
+	if ents, _ := os.ReadDir(ro); len(ents) != 0 {
+		t.Fatalf("left behind: %v", ents)
+	}
+}
+
 // A failed or forced write leaves no temporary file, and -f replaces the old.
 func TestWriteAtomicLeavesNoTemporary(t *testing.T) {
 	dir := t.TempDir()
