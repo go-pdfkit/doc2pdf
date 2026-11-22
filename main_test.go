@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/go-odf/odf"
@@ -311,6 +312,59 @@ func TestWriteAtomicWithoutForceNeverReplaces(t *testing.T) {
 	}
 	if ents, _ := os.ReadDir(dir); len(ents) != 2 {
 		t.Fatalf("temporary files left behind: %v", ents)
+	}
+}
+
+// ⛔ On a file system with no hard links (FAT, exFAT, some SMB) Link fails with
+// something that is not ErrExist, and a plain conversion must still work,
+// without a Stat and Rename that would reopen the race.
+func TestNoHardLinksFallsBackToExclusiveCreate(t *testing.T) {
+	oldLink, oldWrite := linkFile, writeTemp
+	t.Cleanup(func() { linkFile, writeTemp = oldLink, oldWrite })
+	linkFile = func(string, string) error { return syscall.EPERM }
+
+	// It works, and leaves no temporary file.
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "o.pdf")
+	if err := writeAtomic(dst, []byte("new"), false); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "new" {
+		t.Fatalf("got %q", b)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatalf("temporary files left behind: %v", ents)
+	}
+
+	// An existing file is refused as ErrExist and left alone.
+	err := writeAtomic(dst, []byte("other"), false)
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("want ErrExist, got %v", err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "new" {
+		t.Fatalf("an existing file was changed: %q", b)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatalf("temporary files left behind: %v", ents)
+	}
+
+	// The temporary write succeeds and the second one fails: dst is removed.
+	boom := errors.New("disk full")
+	calls := 0
+	writeTemp = func(f *os.File, b []byte) error {
+		calls++
+		if calls == 2 {
+			f.Write(b[:1])
+			return boom
+		}
+		return oldWrite(f, b)
+	}
+	dir2 := t.TempDir()
+	if err := writeAtomic(filepath.Join(dir2, "o.pdf"), []byte("whole"), false); !errors.Is(err, boom) {
+		t.Fatalf("got %v", err)
+	}
+	if ents, _ := os.ReadDir(dir2); len(ents) != 0 {
+		t.Fatalf("left behind: %v", ents)
 	}
 }
 

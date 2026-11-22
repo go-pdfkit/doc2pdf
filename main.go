@@ -246,10 +246,37 @@ func writeAtomic(dst string, b []byte, force bool) error {
 		return os.Rename(name, dst)
 	}
 	// A hard link fails if dst exists, where a rename would replace a file
-	// somebody created since the caller looked. It needs a file system with
-	// hard links (every CI target here has one); where there are none the
-	// link error is reported, never papered over.
-	return os.Link(name, dst)
+	// somebody created since the caller looked.
+	err = linkFile(name, dst)
+	if err == nil || errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	// ⛔ No hard links here (FAT, exFAT, some SMB). Not a Stat and a Rename,
+	// which would reopen the race: create dst with O_EXCL, which refuses an
+	// existing one atomically, and write into it.
+	return createExclusive(dst, b)
+}
+
+// linkFile is os.Link; a variable only so that a test can say the file system
+// has no hard links.
+var linkFile = os.Link
+
+// createExclusive writes b into a dst it creates, refusing one that exists. A
+// failure removes dst again: O_EXCL proves this call made it, so what is
+// removed is never somebody else's file.
+func createExclusive(dst string, b []byte) error {
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	err = writeTemp(f, b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(dst)
+	}
+	return err
 }
 
 // outputName is the second argument, or the input with a .pdf suffix.

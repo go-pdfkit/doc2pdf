@@ -110,7 +110,9 @@ doc2pdf: big.rtf is 20000000 bytes, over the 16777216-byte limit for RTF; -max-i
 The PDF is written to a temporary file beside the output and then published:
 renamed over the output with `-f`, and hard-linked without it, which fails if
 the output exists even if it appeared a moment ago. A failed write never leaves
-a partial file. (Without `-f` the output's file system needs hard links.)
+a partial file. Where the file system has no hard links (FAT, exFAT, some SMB),
+the output is created with an exclusive open instead, which refuses an existing
+file just as atomically.
 
 ## What it cannot do
 
