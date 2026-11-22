@@ -214,6 +214,13 @@ func readBounded(path string, f format, override int64) ([]byte, error) {
 	return b, nil
 }
 
+// writeTemp fills the temporary file. It is a variable only so that a test can
+// make the write fail part-way, which a disk does when it is full.
+var writeTemp = func(f *os.File, b []byte) error {
+	_, err := f.Write(b)
+	return err
+}
+
 // writeAtomic writes beside dst and publishes it, so a failed write leaves
 // either the old file or none, never a partial PDF. With force the file is
 // renamed over dst; without, it is linked, which refuses an existing dst
@@ -228,7 +235,7 @@ func writeAtomic(dst string, b []byte, force bool) error {
 		return err
 	}
 	defer os.Remove(name)
-	_, err = tmp.Write(b)
+	err = writeTemp(tmp, b)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}

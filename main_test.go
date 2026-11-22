@@ -314,6 +314,28 @@ func TestWriteAtomicWithoutForceNeverReplaces(t *testing.T) {
 	}
 }
 
+// A write that fails part-way (a full disk) publishes nothing, with or without
+// force, and leaves no temporary file.
+func TestPartialWriteIsNeverPublished(t *testing.T) {
+	old := writeTemp
+	t.Cleanup(func() { writeTemp = old })
+	boom := errors.New("disk full")
+	writeTemp = func(f *os.File, b []byte) error {
+		f.Write(b[:1])
+		return boom
+	}
+	for _, force := range []bool{false, true} {
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "o.pdf")
+		if err := writeAtomic(dst, []byte("whole"), force); !errors.Is(err, boom) {
+			t.Fatalf("force=%v: got %v", force, err)
+		}
+		if ents, _ := os.ReadDir(dir); len(ents) != 0 {
+			t.Fatalf("force=%v: left behind: %v", force, ents)
+		}
+	}
+}
+
 // ⛔ --max-input 9223372036854775807 made limit+1 wrap, so nothing was read and
 // an empty PDF came out with exit 0. 0 and negatives are refused too, as usage
 // errors that name the flag, and the file is not read or written.
