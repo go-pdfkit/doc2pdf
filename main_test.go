@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/go-odf/odf"
@@ -321,7 +320,7 @@ func TestWriteAtomicWithoutForceNeverReplaces(t *testing.T) {
 func TestNoHardLinksFallsBackToExclusiveCreate(t *testing.T) {
 	oldLink, oldWrite := linkFile, writeTemp
 	t.Cleanup(func() { linkFile, writeTemp = oldLink, oldWrite })
-	linkFile = func(string, string) error { return syscall.EPERM }
+	linkFile = func(string, string) error { return os.ErrPermission }
 
 	// It works, and leaves no temporary file.
 	dir := t.TempDir()
