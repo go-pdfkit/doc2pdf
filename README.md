@@ -100,14 +100,17 @@ doc2pdf: go-ooxml/ooxml could not read this Word: …
 and a larger one is refused without reading it, because the readers bound what
 they allocate only once the file is in memory. The limit is 16 MiB for RTF (the
 default of `go-richdoc/rtf` v0.1.2, whose worst case is then about 80 times the
-input) and 256 MiB for every other format. `--max-input BYTES` replaces it:
+input) and 256 MiB for every other format. `--max-input BYTES` replaces it (from 1 up to 9223372036854775806; anything else
+is a usage error, exit 2):
 
 ```
 doc2pdf: big.rtf is 20000000 bytes, over the 16777216-byte limit for RTF; -max-input raises it
 ```
 
-The PDF is written to a temporary file beside the output and renamed, so a
-failed write, or `-f`, never leaves a partial file.
+The PDF is written to a temporary file beside the output and then published:
+renamed over the output with `-f`, and hard-linked without it, which fails if
+the output exists even if it appeared a moment ago. A failed write never leaves
+a partial file. (Without `-f` the output's file system needs hard links.)
 
 ## What it cannot do
 

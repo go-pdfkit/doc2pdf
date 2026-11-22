@@ -8,6 +8,8 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -264,18 +266,72 @@ func TestWriteAtomicLeavesNoTemporary(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAtomic(dst, []byte("new")); err != nil {
+	if err := writeAtomic(dst, []byte("new"), true); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(dst); string(b) != "new" {
 		t.Fatalf("got %q", b)
 	}
-	if err := writeAtomic(filepath.Join(dir, "missing", "o.pdf"), []byte("x")); err == nil {
+	if err := writeAtomic(filepath.Join(dir, "missing", "o.pdf"), []byte("x"), true); err == nil {
 		t.Fatal("a write into a missing directory succeeded")
 	}
 	ents, _ := os.ReadDir(dir)
 	if len(ents) != 1 {
 		t.Fatalf("temporary files left behind: %v", ents)
+	}
+}
+
+// Without force the output is published by a hard link, which refuses a file
+// that is already there (so one created after the caller looked is not
+// clobbered), and leaves neither the temporary name nor a changed dst. With a
+// free name it publishes.
+func TestWriteAtomicWithoutForceNeverReplaces(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "o.pdf")
+	if err := os.WriteFile(dst, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := writeAtomic(dst, []byte("new"), false)
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("want ErrExist, got %v", err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "mine" {
+		t.Fatalf("an existing file was replaced: %q", b)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatalf("temporary files left behind: %v", ents)
+	}
+
+	free := filepath.Join(dir, "free.pdf")
+	if err := writeAtomic(free, []byte("new"), false); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(free); string(b) != "new" {
+		t.Fatalf("got %q", b)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 2 {
+		t.Fatalf("temporary files left behind: %v", ents)
+	}
+}
+
+// ⛔ --max-input 9223372036854775807 made limit+1 wrap, so nothing was read and
+// an empty PDF came out with exit 0. 0 and negatives are refused too, as usage
+// errors that name the flag, and the file is not read or written.
+func TestMaxInputOutOfRangeIsAUsageError(t *testing.T) {
+	for _, v := range []string{"9223372036854775807", "0", "-1"} {
+		in := write(t, "a.md", []byte("# Title\n"))
+		code, out, errOut := drive(t, "--max-input="+v, in)
+		if code != 2 || out != "" || !strings.Contains(errOut, "--max-input") {
+			t.Errorf("%s: code %d, out %q, err %q", v, code, out, errOut)
+		}
+		if _, err := os.Stat(strings.TrimSuffix(in, ".md") + ".pdf"); err == nil {
+			t.Errorf("%s: a PDF was written", v)
+		}
+	}
+	// The largest accepted value reads the file in full.
+	in := write(t, "b.md", []byte("# Title\n"))
+	if code, out, errOut := drive(t, "--max-input=9223372036854775806", in); code != 0 {
+		t.Errorf("code %d: %s%s", code, out, errOut)
 	}
 }
 

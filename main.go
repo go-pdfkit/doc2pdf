@@ -31,8 +31,11 @@ package main
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +74,7 @@ Exit status: 0 it was written, 1 it was not, 2 a usage error.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			o.maxInputSet = cmd.Flags().Changed("max-input")
 			return fromStatus(run(cmd.OutOrStdout(), cmd.ErrOrStderr(), o, args))
 		},
 	}
@@ -84,9 +88,12 @@ Exit status: 0 it was written, 1 it was not, 2 a usage error.`,
 
 type options struct {
 	maxInput int64
-	list     bool
-	force    bool
-	marginMm float64
+	// maxInputSet is whether --max-input was given at all, so that an explicit
+	// 0 is refused rather than read as "the default".
+	maxInputSet bool
+	list        bool
+	force       bool
+	marginMm    float64
 }
 
 // fromStatus turns an exit code into the error cobra wants, so that main has
@@ -112,6 +119,14 @@ func run(out, errOut interface {
 	}
 	if len(args) < 1 || len(args) > 2 {
 		fmt.Fprintln(errOut, "doc2pdf: give one file to read and, if you like, one to write")
+		return 2
+	}
+
+	// ⛔ A limit of 0 or less, or of MaxInt64 (where limit+1 wraps and nothing
+	// is read, which then looks like an empty document), is a usage error.
+	if o.maxInputSet && (o.maxInput <= 0 || o.maxInput >= math.MaxInt64) {
+		fmt.Fprintf(errOut, "doc2pdf: --max-input must be between 1 and %d bytes, not %d\n",
+			int64(math.MaxInt64-1), o.maxInput)
 		return 2
 	}
 
@@ -147,14 +162,12 @@ func run(out, errOut interface {
 	}
 
 	dst := outputName(in, args)
-	if !o.force {
-		if _, err := os.Stat(dst); err == nil {
+	if err := writeAtomic(dst, pdf, o.force); err != nil {
+		if errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(errOut, "doc2pdf: %s is already there; -f overwrites it\n", dst)
-			return 1
+		} else {
+			fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 		}
-	}
-	if err := writeAtomic(dst, pdf); err != nil {
-		fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 		return 1
 	}
 
@@ -201,9 +214,12 @@ func readBounded(path string, f format, override int64) ([]byte, error) {
 	return b, nil
 }
 
-// writeAtomic writes beside dst and renames, so a failed write leaves either
-// the old file or none, never a partial PDF.
-func writeAtomic(dst string, b []byte) error {
+// writeAtomic writes beside dst and publishes it, so a failed write leaves
+// either the old file or none, never a partial PDF. With force the file is
+// renamed over dst; without, it is linked, which refuses an existing dst
+// (fs.ErrExist) even if it appeared a moment ago. The temporary name never
+// outlives the call.
+func writeAtomic(dst string, b []byte, force bool) error {
 	// The name is made BEFORE the file is opened, so nothing below needs the
 	// file to find it. crypto/rand.Text cannot fail.
 	name := filepath.Join(filepath.Dir(dst), ".doc2pdf-"+rand.Text()+".tmp")
@@ -211,17 +227,22 @@ func writeAtomic(dst string, b []byte) error {
 	if err != nil {
 		return err
 	}
+	defer os.Remove(name)
 	_, err = tmp.Write(b)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
-		err = os.Rename(name, dst)
-	}
 	if err != nil {
-		os.Remove(name)
+		return err
 	}
-	return err
+	if force {
+		return os.Rename(name, dst)
+	}
+	// A hard link fails if dst exists, where a rename would replace a file
+	// somebody created since the caller looked. It needs a file system with
+	// hard links (every CI target here has one); where there are none the
+	// link error is reported, never papered over.
+	return os.Link(name, dst)
 }
 
 // outputName is the second argument, or the input with a .pdf suffix.
