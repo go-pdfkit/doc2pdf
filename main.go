@@ -185,11 +185,9 @@ func readBounded(path string, f format, override int64) ([]byte, error) {
 		return nil, err
 	}
 	defer fh.Close()
-	st, err := fh.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if st.Mode().IsRegular() && st.Size() > limit {
+	// A Stat that fails is not a reason to refuse: the read below is bounded
+	// on its own.
+	if st, err := fh.Stat(); err == nil && st.Mode().IsRegular() && st.Size() > limit {
 		return nil, refuse(st.Size())
 	}
 	b, err := io.ReadAll(io.LimitReader(fh, limit+1))

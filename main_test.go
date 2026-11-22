@@ -192,6 +192,46 @@ func TestMaxInputFlag(t *testing.T) {
 	}
 }
 
+// The refusals of readBounded and of the write, each by what it says.
+func TestReadAndWriteFailuresAreReported(t *testing.T) {
+	// Refused from the size: the message carries the size of the FILE, not the
+	// limit plus one a read would have stopped at.
+	big := write(t, "big.md", nil)
+	if err := os.Truncate(big, 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, e := drive(t, "--max-input", "1048576", big); code != 1 || !strings.Contains(e, "67108864 bytes") {
+		t.Errorf("size refusal: %d %q", code, e)
+	}
+
+	// A missing file, and a directory (opens, cannot be read).
+	if code, _, e := drive(t, filepath.Join(t.TempDir(), "none.md")); code != 1 || !strings.Contains(e, "doc2pdf:") {
+		t.Errorf("missing: %d %q", code, e)
+	}
+	dir := filepath.Join(t.TempDir(), "d.md")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, e := drive(t, dir); code != 1 || !strings.Contains(e, "directory") {
+		t.Errorf("directory: %d %q", code, e)
+	}
+
+	// Not a regular file, so no size to check: the bounded read refuses it.
+	if _, err := os.Stat("/dev/zero"); err == nil {
+		_, err := readBounded("/dev/zero", format{Name: "test"}, 10)
+		if err == nil || !strings.Contains(err.Error(), "11 bytes") {
+			t.Errorf("unbounded device: %v", err)
+		}
+	}
+
+	// A write into a directory that is not there is reported, not dropped.
+	in := write(t, "a.md", []byte("# T\n"))
+	out := filepath.Join(t.TempDir(), "missing", "o.pdf")
+	if code, _, e := drive(t, in, out); code != 1 || !strings.Contains(e, "doc2pdf:") {
+		t.Errorf("write: %d %q", code, e)
+	}
+}
+
 // A failed or forced write leaves no temporary file, and -f replaces the old.
 func TestWriteAtomicLeavesNoTemporary(t *testing.T) {
 	dir := t.TempDir()
