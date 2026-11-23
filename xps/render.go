@@ -502,9 +502,9 @@ func (r *renderer) gradient(br *node, alpha float64, cx ctx) error {
 		prev = off
 		stops = append(stops, pdfkit.Stop{Offset: off, Color: asRGB(s.col)})
 	}
-	if len(stops) == 0 {
-		return nil
-	}
+	// The first stop is always kept (its offset is in [0, 1], and only a
+	// stop pushed past 1 by the strict ordering is dropped), so one is at
+	// least there.
 	if len(stops) == 1 {
 		stops = []pdfkit.Stop{{Offset: 0, Color: stops[0].Color}, {Offset: 1, Color: stops[0].Color}}
 	}

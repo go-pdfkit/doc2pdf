@@ -162,7 +162,7 @@ func run(out, errOut interface {
 			fmt.Fprintf(errOut, "doc2pdf: %s could not read this %s: %v\n", f.From, f.Name, err)
 			return 1
 		}
-		pdf, err = document.Write(doc, document.WriteOptions{
+		pdf, err = writeDocument(doc, document.WriteOptions{
 			MarginMm:  o.marginMm,
 			OnRefused: func(u string) { refused = append(refused, u) },
 		})
@@ -230,6 +230,10 @@ func readBounded(path string, f format, override int64) ([]byte, error) {
 
 // writeTemp fills the temporary file. It is a variable only so that a test can
 // make the write fail part-way, which a disk does when it is full.
+// writeDocument lays a richdoc out as a PDF; a variable so that a test can make
+// it fail, which no document a reader returns does.
+var writeDocument = document.Write
+
 var writeTemp = func(f *os.File, b []byte) error {
 	_, err := f.Write(b)
 	return err

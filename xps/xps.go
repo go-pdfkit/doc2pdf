@@ -305,10 +305,11 @@ func (c *converter) resolve(base, uri string) (string, error) {
 	} else {
 		joined = path.Join("/"+path.Dir(base), dec)
 	}
+	// Both branches above are cleaned from the root, and a cleaned rooted
+	// path cannot climb out of it ("/.." is "/"), so a name that "leaves the
+	// package" arrives here as a name inside it; and the root itself, "", is no
+	// part, which Has says.
 	joined = strings.TrimPrefix(joined, "/")
-	if joined == "" || joined == "." || joined == ".." || strings.HasPrefix(joined, "../") {
-		return "", fmt.Errorf("%w: %q leaves the package", ErrBadPartName, uri)
-	}
 	if !c.pkg.Has(joined) {
 		return "", fmt.Errorf("%w: %q is not there", ErrBadPartName, joined)
 	}
@@ -411,13 +412,14 @@ func (c *converter) run() (*Result, error) {
 		}
 	}
 	var out bytes.Buffer
-	if err := c.doc.Write(&out); err != nil {
-		return nil, fmt.Errorf("xps: writing the PDF: %w", err)
+	err = c.doc.Write(&out)
+	if err == nil {
+		res := &Result{PDF: out.Bytes(), Pages: c.pages}
+		for what, n := range c.skip {
+			res.Skipped = append(res.Skipped, fmt.Sprintf("%s (%d)", what, n))
+		}
+		sort.Strings(res.Skipped)
+		return res, nil
 	}
-	res := &Result{PDF: out.Bytes(), Pages: c.pages}
-	for what, n := range c.skip {
-		res.Skipped = append(res.Skipped, fmt.Sprintf("%s (%d)", what, n))
-	}
-	sort.Strings(res.Skipped)
-	return res, nil
+	return nil, fmt.Errorf("xps: writing the PDF: %w", err)
 }

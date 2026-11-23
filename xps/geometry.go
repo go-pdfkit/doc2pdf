@@ -120,10 +120,9 @@ func (sc *scanner) letter() byte {
 	sc.skip()
 	if sc.pos < len(sc.s) {
 		c := sc.s[sc.pos]
+		// "e" and "E" are returned like any letter, and no command is named by
+		// them: they are refused as unknown, as "e5" would be as a number.
 		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' {
-			if c == 'e' || c == 'E' {
-				return 0
-			}
 			return c
 		}
 	}
@@ -139,21 +138,17 @@ func (sc *scanner) num() (float64, bool) {
 	if i < len(s) && (s[i] == '+' || s[i] == '-') {
 		i++
 	}
-	digits := 0
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 		i++
-		digits++
 	}
 	if i < len(s) && s[i] == '.' {
 		i++
 		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 			i++
-			digits++
 		}
 	}
-	if digits == 0 {
-		return 0, false
-	}
+	// A string with no digit ("", ".", "+", "e5") is no number: finiteNum,
+	// which is strconv, refuses it below.
 	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
 		j := i + 1
 		if j < len(s) && (s[j] == '+' || s[j] == '-') {
@@ -184,10 +179,11 @@ func parseNums(s string, max int) ([]float64, bool) {
 			return nil, false
 		}
 		v, ok := sc.num()
-		if !ok {
-			return nil, false
+		if ok {
+			out = append(out, v)
+			continue
 		}
-		out = append(out, v)
+		return nil, false
 	}
 	return out, true
 }
@@ -270,11 +266,9 @@ func (b *builder) arc(rx, ry, rotDeg float64, large, sweep bool, x2, y2 float64)
 	if x1 == x2 && y1 == y2 {
 		return
 	}
+	// A zero radius is a line: its scale below is infinite, its curves come
+	// out NaN, and the check on them draws the line.
 	rx, ry = math.Abs(rx), math.Abs(ry)
-	if rx == 0 || ry == 0 {
-		b.line(x2, y2)
-		return
-	}
 	phi := rotDeg * math.Pi / 180
 	cos, sin := math.Cos(phi), math.Sin(phi)
 	dx, dy := (x1-x2)/2, (y1-y2)/2
@@ -520,7 +514,7 @@ func (r *renderer) figure(fig *node, b *builder) error {
 		case "PolyLineSegment", "PolyBezierSegment", "PolyQuadraticBezierSegment":
 			maxN := 2 * b.max
 			pts, ok := parseNums(s.attr("Points"), maxN)
-			if !ok || len(pts)%2 != 0 {
+			if !ok {
 				return fmt.Errorf("%w: %s Points", ErrBadGeometry, s.name)
 			}
 			step := map[string]int{"PolyLineSegment": 2, "PolyBezierSegment": 6, "PolyQuadraticBezierSegment": 4}[s.name]
@@ -535,9 +529,6 @@ func (r *renderer) figure(fig *node, b *builder) error {
 					b.cubic(pts[i], pts[i+1], pts[i+2], pts[i+3], pts[i+4], pts[i+5])
 				default:
 					b.quad(pts[i], pts[i+1], pts[i+2], pts[i+3])
-				}
-				if b.err != nil {
-					return b.err
 				}
 			}
 		case "ArcSegment":

@@ -98,10 +98,10 @@ func (c *converter) font(base, uri string) (*face, error) {
 		return nil, errUnsupportedFont
 	}
 	ot, err := opentype.Parse(b)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrBadFont, name, err)
+	var pf *pdfkit.Font
+	if err == nil {
+		pf, err = pdfkit.NewFont(ot)
 	}
-	pf, err := pdfkit.NewFont(ot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrBadFont, name, err)
 	}
@@ -260,9 +260,8 @@ func (r *renderer) glyphs(n *node, cx ctx) error {
 			maps[i] = mapping{n: 1, m: 1}
 		}
 	}
-	if len(maps) > r.c.lim.MaxGlyphsPerRun {
-		return limit("glyphs in one run", r.c.lim.MaxGlyphsPerRun)
-	}
+	// No count is checked again here: the string was bounded above, and
+	// parseIndices refuses more than the same ceiling of entries.
 	if err := r.c.work(len(maps)); err != nil {
 		return err
 	}
@@ -273,10 +272,9 @@ func (r *renderer) glyphs(n *node, cx ctx) error {
 	bidi, _ := finiteNum(n.attr("BidiLevel"))
 	rtl := int(bidi)%2 != 0
 
+	// opentype.Parse refuses a font with no units per em (TestZeroUnitsPerEm),
+	// so the divisor below is positive for every font that was loaded.
 	upem := float64(f.ot.UnitsPerEm())
-	if upem <= 0 {
-		return fmt.Errorf("%w: unitsPerEm", ErrBadFont)
-	}
 	nGlyphs := f.ot.NumGlyphs()
 	glyphs := make([]pdfkit.Glyph, 0, len(maps))
 	pen, pos, pending := 0.0, 0, 0
@@ -329,10 +327,8 @@ func (r *renderer) glyphs(n *node, cx ctx) error {
 		}
 		glyphs = append(glyphs, pdfkit.Glyph{ID: opentype.GlyphIndex(gid), X: x, Y: mp.vOff / 100 * size, Text: text})
 	}
-	if len(glyphs) == 0 {
-		return nil
-	}
-
+	// A run of no glyphs falls through: pdfkit shows no text for it, and its
+	// clip and transform are still read, so a malformed one is still named.
 	r.p.Save()
 	defer r.p.Restore()
 	r.transform(n, cx)

@@ -40,6 +40,8 @@ type pkg struct {
 	ctypes map[string]string // extra overrides, by part name with a slash
 	seq    string            // the FixedDocumentSequence, when not the default
 	doc    string            // the FixedDocument, when not the default
+	rels   string            // the package relationships, when not the default
+	noSeq  bool              // leave the sequence without its content type
 }
 
 func newPkg(pages ...string) *pkg {
@@ -75,7 +77,9 @@ func (p *pkg) bytes(t testing.TB) []byte {
 	} {
 		fmt.Fprintf(&types, `<Default Extension="%s" ContentType="%s"/>`, ext, ct)
 	}
-	fmt.Fprintf(&types, `<Override PartName="/FixedDocumentSequence.fdseq" ContentType="%s"/>`, ctSequence)
+	if !p.noSeq {
+		fmt.Fprintf(&types, `<Override PartName="/FixedDocumentSequence.fdseq" ContentType="%s"/>`, ctSequence)
+	}
 	fmt.Fprintf(&types, `<Override PartName="/Documents/1/FixedDocument.fdoc" ContentType="%s"/>`, ctDocument)
 	for i := range p.pages {
 		fmt.Fprintf(&types, `<Override PartName="/Documents/1/Pages/%d.fpage" ContentType="%s"/>`, i+1, ctPage)
@@ -85,7 +89,11 @@ func (p *pkg) bytes(t testing.TB) []byte {
 	}
 	types.WriteString(`</Types>`)
 	add("[Content_Types].xml", []byte(types.String()))
-	add("_rels/.rels", []byte(fmt.Sprintf(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="%s" Target="/FixedDocumentSequence.fdseq"/></Relationships>`, p.rel)))
+	rels := fmt.Sprintf(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="%s" Target="/FixedDocumentSequence.fdseq"/></Relationships>`, p.rel)
+	if p.rels != "" {
+		rels = p.rels
+	}
+	add("_rels/.rels", []byte(rels))
 	seq := fmt.Sprintf(`<FixedDocumentSequence xmlns="%s"><DocumentReference Source="/Documents/1/FixedDocument.fdoc"/></FixedDocumentSequence>`, nsOXPS)
 	if p.seq != "" {
 		seq = p.seq

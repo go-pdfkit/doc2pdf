@@ -65,11 +65,8 @@ func (c *converter) image(part string) (*imageInfo, error) {
 	default:
 		return nil, fmt.Errorf("%w: %s is not JPEG, PNG or TIFF", ErrBadImage, part)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrBadImage, part, err)
-	}
-	if cfg.Width <= 0 || cfg.Height <= 0 {
-		return nil, fmt.Errorf("%w: %s is empty", ErrBadImage, part)
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, fmt.Errorf("%w: %s is unreadable or empty: %v", ErrBadImage, part, err)
 	}
 	px := int64(cfg.Width) * int64(cfg.Height)
 	if px > int64(c.lim.MaxImagePixels) {
@@ -223,10 +220,10 @@ func (r *renderer) clipRect(x, y, w, h float64) {
 // alternate columns (FlipX), rows (FlipY) or both.
 func (r *renderer) imageBrush(g *geometry, br *node, alpha float64, cx ctx) error {
 	part, err := r.c.resolve(r.part, r.imageSource(br.attr("ImageSource")))
-	if err != nil {
-		return err
+	var im *imageInfo
+	if err == nil {
+		im, err = r.c.image(part)
 	}
-	im, err := r.c.image(part)
 	if errors.Is(err, errUnsupportedImage) {
 		r.c.note("JPEG XR image")
 		return nil
@@ -276,10 +273,7 @@ func (r *renderer) imageBrush(g *geometry, br *node, alpha float64, cx ctx) erro
 	}
 
 	// The tiles that touch the shape: its box, taken back into brush space.
-	x0, y0, x1, y1, ok := g.bounds()
-	if !ok {
-		return nil
-	}
+	x0, y0, x1, y1, _ := g.bounds()
 	if hasM {
 		det := m[0]*m[3] - m[1]*m[2]
 		if det == 0 || math.IsNaN(det) || math.IsInf(det, 0) {
@@ -300,15 +294,14 @@ func (r *renderer) imageBrush(g *geometry, br *node, alpha float64, cx ctx) erro
 	i0, i1 := math.Floor((x0-vp[0])/vp[2]), math.Ceil((x1-vp[0])/vp[2])-1
 	j0, j1 := math.Floor((y0-vp[1])/vp[3]), math.Ceil((y1-vp[1])/vp[3])-1
 	cols, rows := i1-i0+1, j1-j0+1
-	if math.IsNaN(cols) || math.IsNaN(rows) || cols < 1 || rows < 1 {
-		return nil
-	}
 	// Compared as floats: the product of two huge counts overflows an int
-	// before it can be refused.
-	if cols*rows > float64(r.c.lim.MaxTiles) {
+	// before it can be refused. Written so that what is not a number, which
+	// no box of a real shape gives, is refused with the rest, and a count
+	// below one (nothing to draw) is charged nothing.
+	if !(cols*rows <= float64(r.c.lim.MaxTiles)) {
 		return limit("tiles in one brush", r.c.lim.MaxTiles)
 	}
-	if err := r.c.work(int(cols * rows)); err != nil {
+	if err := r.c.work(int(math.Max(cols*rows, 0))); err != nil {
 		return err
 	}
 	for j := j0; j <= j1; j++ {
