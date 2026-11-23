@@ -73,6 +73,23 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | OpenDocument Spreadsheet | `.ods` | `go-odf/odf` |
 | OpenDocument Presentation | `.odp` | `go-odf/odf` |
 | OpenDocument Graphics | `.odg` | `go-odf/odf` |
+| HEIF image | `.heic` `.heif` `.hif` | `go-images/heif` |
+
+**HEIC and HEIF pictures** are pictures, not documents, so they skip the richdoc
+model: each file becomes one page whose size is the decoded picture's, *after*
+its rotation, mirroring and cropping, laid at `--dpi` (default 150). A picture too
+large for a PDF page (14400 points a side) is scaled down to fit. Give several
+files and they become one PDF, in order; a last argument ending in `.pdf` is the
+output, and without one the output is named after the first file:
+
+```
+doc2pdf photo.heic                          # photo.pdf, one page
+doc2pdf --dpi 300 a.heic b.heic album.pdf   # album.pdf, two pages
+```
+
+Pictures and documents cannot be joined in one run (exit 2). Only the HEVC
+pictures of a HEIF file are read; alpha, HDR gain maps and image sequences are
+not (see the [go-images/heif README](https://github.com/go-images/heif#not-supported)).
 
 **What RTF conversion keeps.** Structure: headings, lists, tables, hyperlinks
 (http, https, mailto), footnotes, PNG and JPEG pictures, bold, italic, strike,

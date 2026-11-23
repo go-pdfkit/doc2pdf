@@ -82,6 +82,7 @@ Exit status: 0 it was written, 1 it was not, 2 a usage error.`,
 	f.BoolVar(&o.list, "list", false, "print the formats this reads, and what reads them")
 	f.BoolVarP(&o.force, "force", "f", false, "overwrite the output if it is already there")
 	f.Float64Var(&o.marginMm, "margin", 20, "the margin on every side, in millimetres")
+	f.Float64Var(&o.dpi, "dpi", 150, "for pictures: the resolution their pixels are laid at, which sets the page size")
 	f.Int64Var(&o.maxInput, "max-input", 0, "the largest input to read, in bytes (default: 16 MiB for RTF, 256 MiB otherwise)")
 	return c
 }
@@ -94,6 +95,7 @@ type options struct {
 	list        bool
 	force       bool
 	marginMm    float64
+	dpi         float64
 }
 
 // fromStatus turns an exit code into the error cobra wants, so that main has
@@ -116,6 +118,9 @@ func run(out, errOut interface {
 	if o.list {
 		listFormats(out)
 		return 0
+	}
+	if len(args) >= 1 && isImage(args[0]) {
+		return runImages(out, errOut, o, args)
 	}
 	if len(args) < 1 || len(args) > 2 {
 		fmt.Fprintln(errOut, "doc2pdf: give one file to read and, if you like, one to write")
@@ -300,7 +305,7 @@ func outputName(in string, args []string) string {
 // row is added, which is the only kind of layout worth having in a list that
 // grows.
 func listFormats(out interface{ Write([]byte) (int, error) }) {
-	name, suffix := 0, 0
+	name, suffix := len(imageFormat.Name), len(strings.Join(imageFormat.Suffixes, " "))
 	for _, f := range formats {
 		name = max(name, len(f.Name))
 		suffix = max(suffix, len(strings.Join(f.Suffixes, " ")))
@@ -309,4 +314,6 @@ func listFormats(out interface{ Write([]byte) (int, error) }) {
 		fmt.Fprintf(out, "%-*s  %-*s  %s\n",
 			name, f.Name, suffix, strings.Join(f.Suffixes, " "), f.From)
 	}
+	fmt.Fprintf(out, "%-*s  %-*s  %s\n",
+		name, imageFormat.Name, suffix, strings.Join(imageFormat.Suffixes, " "), imageFormat.From)
 }

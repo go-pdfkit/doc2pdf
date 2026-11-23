@@ -3,11 +3,13 @@ module github.com/go-pdfkit/doc2pdf
 go 1.27.4
 
 require (
+	github.com/go-images/heif v0.0.0-20261123185950-ec52c9a1a0ff
 	github.com/go-odf/odf v0.11.0
 	github.com/go-ooxml/ooxml v0.8.0
 	github.com/go-ooxml/opc v0.2.1
 	github.com/go-pdfkit/document v0.2.0
 	github.com/go-pdfkit/extract v0.11.0
+	github.com/go-pdfkit/pdfkit v0.20.0
 	github.com/go-pdfkit/reader v0.20.0
 	github.com/go-richdoc/data v0.5.0
 	github.com/go-richdoc/email v0.4.0
@@ -29,6 +31,8 @@ require (
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/evanw/esbuild v0.28.2 // indirect
+	github.com/go-avkit/bitstream v0.4.0 // indirect
+	github.com/go-avkit/h265 v0.24.0 // indirect
 	github.com/go-browserhttp/browserhttp v0.2.0 // indirect
 	github.com/go-docutils/docutils v0.141.1 // indirect
 	github.com/go-gfx/gfx v0.37.0 // indirect
@@ -42,9 +46,9 @@ require (
 	github.com/go-opentype/opentype v0.20.0 // indirect
 	github.com/go-pdfkit/html2pdf v0.4.1 // indirect
 	github.com/go-pdfkit/pdffont v0.4.0 // indirect
-	github.com/go-pdfkit/pdfkit v0.20.0 // indirect
 	github.com/go-simd/highway v0.0.14 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
+	github.com/go-videodsp/kernels v0.19.0 // indirect
 	github.com/go-webengine/engine v0.18.1 // indirect
 	github.com/go-webengine/esbuildsandbox v0.1.0 // indirect
 	github.com/go-widgets/painter v0.16.0 // indirect
