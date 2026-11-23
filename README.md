@@ -107,34 +107,35 @@ author chose every number in it, so every ceiling is a `xps.Limits` field and
 a refusal names what was exceeded. At the **default limits** (what `doc2pdf`
 passes) the peak heap was measured, under a 640 MiB soft memory limit
 (`GOMEMLIMIT`), on the worst input found for each cost: a package of 85 KB that
-asks for ten million path segments is refused at about **250 MiB** (the
-content stream is an in-memory buffer, so it is budgeted in estimated bytes,
-`MaxContentBytes`, 48 MiB: each segment, glyph, tile, dash number and drawn
-element is charged what it writes, since a dash array of 126 long numbers is
-as many bytes as a hundred segments); a dashed-path bomb is refused at 181 MiB,
-a tile bomb at 62 MiB, seven 32 MiB JPEG parts at 135 MiB (`MaxEmbeddedBytes`,
-64 MiB, counted on every draw); a PNG, TIFF or JPEG that `pdfkit` cannot embed
-as it is gets its decode memory estimated from the header BEFORE it is decoded
-(`MaxDecodeBytes`, 192 MiB: 24 bytes a pixel for 8-bit colour, 40 for 16-bit)
-and every draw is charged its pixels (`MaxDrawnPixels`); a progressive JPEG
-of that kind is not decoded at all; tile indices beyond 2^31 are refused;
+asks for ten million path segments is refused at about **220 MiB** (the
+content stream is an in-memory buffer, so it is budgeted in bytes,
+`MaxContentBytes`, 48 MiB, as the PDF library counts them after every drawn
+element, since a dash array of 126 long numbers is as many bytes as a hundred
+segments); a dashed-path bomb is refused at 244 MiB, a tile bomb at 153 MiB,
+seven 32 MiB JPEG parts at 140 MiB (`MaxEmbeddedBytes`, 64 MiB, counted once
+per image: an image is registered with the PDF once however often it is drawn,
+and forty draws of a 2048 x 2048 PNG cost 21 MiB); a PNG or TIFF has its
+decode memory estimated from the header BEFORE it is decoded (`MaxDecodeBytes`,
+192 MiB: 24 bytes a pixel for 8-bit colour, 40 for 16-bit) and is charged its
+pixels once (`MaxDrawnPixels`); a JPEG is embedded as it is and never decoded
+here, progressive ones included; tile indices beyond 2^31 are refused;
 sixteen case-spelled aliases of one 8 MiB part cost 8 MiB, because a part is
 cached under its real name; a `<!DOCTYPE>` is refused (the attribute scan and
 `encoding/xml` disagreed about where one ends), and four million attributes on
 one element are refused before they are allocated (at most 256 per element,
 duplicates refused) at 19 MiB. **No probe of the two security reviews exceeded
 250 MiB** at the defaults, and `xps/security2_test.go` fails any of them above
-400 MiB. That is a measurement on those inputs, not a proof: the content
-budget is an estimate of the stream until the PDF library reports its length,
-and the kept parts (`MaxUncompressedBytes`, 256 MiB) come on top of it.
+400 MiB. That is a measurement on those inputs, not a proof: an element is
+measured after it is written, so it overshoots the content budget by what one
+element can write, and the kept parts (`MaxUncompressedBytes`, 256 MiB) come on top of it.
 
 ⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
 `ImageSource` with a scheme, a `..` that leaves the package, or a part that
 is not there is refused. Every size is bounded before it is allocated: package,
 part and total uncompressed bytes, the compression ratio, part count, pages,
 elements and nesting per part, segments per path, glyphs per run, fonts, image
-pixels (read from the header, before any decode), tiles, and an overall work
-budget charged for every draw. A bound that is hit is an error that names it,
+pixels (read from the header, before any decode), tiles, the content stream,
+and an overall work budget charged for every draw. A bound that is hit is an error that names it,
 and the file is refused whole.
 
 **What RTF conversion keeps.** Structure: headings, lists, tables, hyperlinks

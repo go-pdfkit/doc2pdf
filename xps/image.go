@@ -31,10 +31,12 @@ type imageInfo struct {
 	kind       string // "jpeg", "png" or "tiff"
 	w, h       int
 	dpiX, dpiY float64
-	// cost estimates the memory one decode of the image needs (see
-	// decodeCost); progressive is a JPEG with several scans.
-	cost        int64
-	progressive bool
+	// cost estimates the memory one decode of the image needs (see decodeCost).
+	cost int64
+	// handle is the image in the PDF, made at the first draw; err is why it
+	// could not be (a limit is not kept).
+	handle *pdfkit.Image
+	err    error
 }
 
 // decodeCost estimates the bytes one decode of a w*h image needs, from its
@@ -60,40 +62,6 @@ func decodeCost(cfg image.Config) int64 {
 		}
 	}
 	return int64(cfg.Width) * int64(cfg.Height) * (bpp*4 + 8)
-}
-
-// jpegProgressive says whether the JPEG's frame header is a progressive (or
-// lossless, or arithmetic-coded) one: image/jpeg keeps every coefficient block
-// of such an image until the last scan, and allocates them at the FIRST scan,
-// so a 36-byte file declaring the largest image costs the memory of it all.
-// The markers are read as image/jpeg reads them, bytes before the first one
-// skipped.
-func jpegProgressive(b []byte) bool {
-	for i := 2; i+4 <= len(b); {
-		if b[i] != 0xFF {
-			i++
-			continue
-		}
-		m := b[i+1]
-		switch {
-		case m == 0xFF:
-			i++
-			continue
-		case m == 0 || m == 1 || (m >= 0xD0 && m <= 0xD8):
-			i += 2
-			continue
-		case m == 0xDA:
-			return false
-		case m == 0xC2 || m == 0xC6 || m == 0xCA || m == 0xCE:
-			return true
-		}
-		n := int(binary.BigEndian.Uint16(b[i+2:]))
-		if n < 2 {
-			return false
-		}
-		i += 2 + n
-	}
-	return false
 }
 
 // image reads an image part and measures it.
@@ -162,7 +130,6 @@ func (c *converter) readImage(part string) (*imageInfo, error) {
 	}
 	im.w, im.h = cfg.Width, cfg.Height
 	im.cost = decodeCost(cfg)
-	im.progressive = im.kind == "jpeg" && jpegProgressive(b)
 	if c.images == nil {
 		c.images = map[string]*imageInfo{}
 	}
@@ -239,69 +206,83 @@ func (r *renderer) imageSource(v string) string {
 // drawImage places the whole image in the rectangle (x, y, w, h), in page
 // units with y down. The image is drawn y-up, so the space is flipped for it.
 func (r *renderer) drawImage(im *imageInfo, x, y, w, h float64) error {
-	r.c.embedded += int64(len(im.data))
-	if r.c.embedded > r.c.lim.MaxEmbeddedBytes {
-		return limit("bytes of images drawn", int(min(r.c.lim.MaxEmbeddedBytes, math.MaxInt32)))
-	}
-	if err := r.c.content(bytesPerImage); err != nil {
+	h0, err := r.register(im)
+	if err != nil {
 		return err
 	}
 	r.p.Save()
 	defer r.p.Restore()
 	r.p.Transform(1, 0, 0, -1, 0, 0)
-	rect := pdfkit.Rect{X: x, Y: -(y + h), Width: w, Height: h}
-	// ⛔ A PNG or TIFF is decoded and converted to samples on every draw, and a
-	// JPEG pdfkit refuses is decoded the same way: that costs time and a
-	// transient w*h*5 bytes each time, so each draw is charged its pixels. A JPEG
-	// pdfkit takes is embedded as it is and costs its bytes only.
-	if im.kind == "jpeg" && r.p.DrawJPEG(im.data, rect) == nil {
-		return nil
+	return r.p.DrawImageHandle(h0, pdfkit.Rect{X: x, Y: -(y + h), Width: w, Height: h})
+}
+
+// register gives the image's handle in the PDF, embedding it the first time.
+//
+// ⛔ One handle per image part: a draw after the first costs the few bytes of
+// its operator, which MaxContentBytes counts, and neither a decode nor a
+// copy. What an embedding costs is charged once, here. A part that could not be
+// embedded is remembered, so a thousand draws of it fail alike without trying
+// again; a limit ends the conversion and is not remembered.
+func (r *renderer) register(im *imageInfo) (*pdfkit.Image, error) {
+	if im.handle != nil {
+		return im.handle, nil
+	}
+	if im.err != nil {
+		return nil, im.err
+	}
+	h, err := r.embed(im)
+	if err != nil {
+		if !errors.Is(err, ErrLimit) {
+			im.err = err
+		}
+		return nil, err
+	}
+	im.handle = h
+	return h, nil
+}
+
+// embed registers the image with the document: a JPEG pdfkit takes as it is,
+// otherwise the decoded pixels.
+func (r *renderer) embed(im *imageInfo) (*pdfkit.Image, error) {
+	r.c.embedded += int64(len(im.data))
+	if r.c.embedded > r.c.lim.MaxEmbeddedBytes {
+		return nil, limit("bytes of images embedded", int(min(r.c.lim.MaxEmbeddedBytes, math.MaxInt32)))
+	}
+	// ⛔ A JPEG is embedded as it is and never decoded here: image/jpeg allocates
+	// a progressive image's coefficients at the first scan (a 36-byte file cost
+	// 540 MiB), and pdfkit takes the files image/jpeg takes, progressive and
+	// stray bytes included.
+	if im.kind == "jpeg" {
+		h, err := r.c.doc.AddJPEG(im.data)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrBadImage, err)
+		}
+		return h, nil
 	}
 	// ⛔ Everything that bounds a decode is checked HERE, from the header, before
-	// the decoder allocates: image/jpeg allocates a progressive image's
-	// coefficients at the first scan and fails only afterwards.
-	if im.progressive {
-		return fmt.Errorf("%w: a progressive JPEG pdfkit does not embed is not decoded", ErrBadImage)
-	}
+	// the decoder allocates.
 	if im.cost > r.c.lim.MaxDecodeBytes {
-		return limit("estimated bytes to decode one image", int(min(r.c.lim.MaxDecodeBytes, math.MaxInt32)))
+		return nil, limit("estimated bytes to decode one image", int(min(r.c.lim.MaxDecodeBytes, math.MaxInt32)))
 	}
-	if err := r.chargePixels(im); err != nil {
-		return err
-	}
-	return r.drawDecoded(im, rect)
-}
-
-// chargePixels charges one decoding of the image against MaxDrawnPixels.
-func (r *renderer) chargePixels(im *imageInfo) error {
 	r.c.drawn += int64(im.w) * int64(im.h)
 	if r.c.drawn > int64(r.c.lim.MaxDrawnPixels) {
-		return limit("pixels decoded to draw images", r.c.lim.MaxDrawnPixels)
+		return nil, limit("pixels decoded to draw images", r.c.lim.MaxDrawnPixels)
 	}
-	return nil
-}
-
-// drawDecoded decodes the image (its size already bounded and charged) and
-// draws the pixels, for what pdfkit does not take as it is. The decoded image
-// is NOT kept: a conversion holds one at a time, not one per part.
-func (r *renderer) drawDecoded(im *imageInfo, rect pdfkit.Rect) error {
 	var (
 		img image.Image
 		err error
 	)
 	switch im.kind {
-	case "jpeg":
-		img, err = jpeg.Decode(bytes.NewReader(im.data))
 	case "png":
 		img, err = png.Decode(bytes.NewReader(im.data))
 	default:
 		img, err = tiff.Decode(bytes.NewReader(im.data))
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrBadImage, err)
+		return nil, fmt.Errorf("%w: %v", ErrBadImage, err)
 	}
-	r.p.DrawImage(img, rect)
-	return nil
+	// The decoded image is not kept: the handle holds the compressed samples.
+	return r.c.doc.AddImage(img), nil
 }
 
 // clipRect clips to an axis-aligned rectangle.
@@ -415,13 +396,7 @@ func (r *renderer) imageBrush(g *geometry, br *node, alpha float64, cx ctx) erro
 	if !(cols*rows <= float64(r.c.lim.MaxTiles)) {
 		return limit("tiles in one brush", r.c.lim.MaxTiles)
 	}
-	n := int(math.Max(cols*rows, 0))
-	if err := r.c.work(n); err != nil {
-		return err
-	}
-	// Every tile is a Save, a Transform, a clip and a draw: charged up front,
-	// so the refusal comes before the first of them.
-	if err := r.c.content(int64(n) * bytesPerTile); err != nil {
+	if err := r.c.work(int(math.Max(cols*rows, 0))); err != nil {
 		return err
 	}
 	for j := int64(j0); j <= int64(j1); j++ {

@@ -138,28 +138,23 @@ type Limits struct {
 	// is what bounds the content stream, and a vector-heavy document can raise
 	// both.
 	MaxWork int
-	// MaxContentBytes is an ESTIMATE of the page content written, in bytes,
-	// across all pages: each segment, glyph, stop, tile, dash number and drawn
-	// element is charged the bytes it adds to the in-memory content stream
-	// (a tile is charged 400 bytes, a dash number 24, a segment 32). MaxWork
-	// counts units and cannot see that two segments and a 126-number dash array
-	// are not the same size. Default 48 MiB.
+	// MaxContentBytes is the page content stream, in bytes, across all pages, as
+	// the PDF library reports it (Page.ContentLen) after every drawn element.
+	// MaxWork counts units and cannot see that two segments and a
+	// 126-number dash array are not the same size. Default 48 MiB.
 	MaxContentBytes int64
-	// MaxEmbeddedBytes is the bytes of images embedded, every draw counted: the
-	// PDF holds them, and is then copied once more to be returned. Default 64
-	// MiB.
+	// MaxEmbeddedBytes is the bytes of image parts embedded: an image is
+	// registered with the PDF once, however often it is drawn. Default 64 MiB.
 	MaxEmbeddedBytes int64
 	// MaxDecodeBytes is the most memory one image decode may be estimated to
 	// need (pixels times a per-pixel cost by format and depth), checked from the
 	// header BEFORE the image is decoded: 24 bytes a pixel for an 8-bit
-	// colour image, 40 for a 16-bit one. A JPEG that is embedded as it is
-	// costs nothing here, and a progressive one that is not is never decoded.
-	// Default 192 MiB.
+	// colour image, 40 for a 16-bit one. A JPEG is embedded as it is and never
+	// decoded, so it costs nothing here. Default 192 MiB.
 	MaxDecodeBytes int64
-	// MaxDrawnPixels is the pixels decoded to draw images, charged on EVERY
-	// draw: a PNG is decoded again each time it is painted, so a 36 million
-	// pixel image painted a thousand times must be refused, not paid for.
-	// Default 128 million.
+	// MaxDrawnPixels is the pixels of PNG and TIFF images decoded, in all: each
+	// image is decoded and embedded once, however often it is drawn, so this
+	// bounds the time of the decodes. Default 128 million.
 	MaxDrawnPixels int
 	// MaxImagePixels is the pixels of one image. Default 36 million.
 	MaxImagePixels int
@@ -272,17 +267,17 @@ type converter struct {
 	byLower map[string]string
 	// retained is the bytes of parts kept in the caches, charged once per real
 	// part and against MaxUncompressedBytes; drawn is the pixels decoded to
-	// draw images, every draw included.
+	// embed images, once per image.
 	retained int64
 	drawn    int64
 	// badImages remembers an image part that failed, so that it is read once.
 	badImages map[string]error
 	// spent is the drawing work charged so far, and embedded the bytes of
-	// images drawn, repeats included.
+	// images embedded, once per image.
 	spent    int
 	embedded int64
-	// written is the estimated bytes of page content so far.
-	written int64
+	// done is the content bytes of the pages finished so far.
+	done int64
 }
 
 // note counts something that was not drawn.

@@ -67,13 +67,3 @@ func TestBoundaryPageSide(t *testing.T) {
 		t.Errorf("a page over MaxPageUnits: %v", err)
 	}
 }
-
-func TestBoundaryJPEGProgressiveMinimal(t *testing.T) {
-	// SOI, then a bare four-byte SOF2 marker at the very end of the buffer.
-	if !jpegProgressive([]byte{0xFF, 0xD8, 0xFF, 0xC2, 0x00, 0x02}) {
-		t.Error("a marker that ends the buffer is not read")
-	}
-	if jpegProgressive([]byte{0xFF, 0xD8, 0xFF, 0xC2, 0x00}) {
-		t.Error("a truncated marker was read")
-	}
-}

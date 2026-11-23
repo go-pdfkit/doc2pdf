@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-pdfkit/pdfkit"
 )
 
 // worstPeakMiB is the most any probe of either review may reach at the default
@@ -202,19 +204,12 @@ func TestSecEachContentChargeRefuses(t *testing.T) {
 	if _, err := Convert(once, Limits{MaxContentBytes: 1 << 20}); err != nil {
 		t.Fatalf("the image once: %v", err)
 	}
-	// Past the element and the four segments, not the image's own bytes.
-	if _, err := Convert(once, Limits{MaxContentBytes: bytesPerElement + 4*bytesPerUnit + bytesPerImage - 1}); !errors.Is(err, ErrLimit) {
-		t.Errorf("an image's bytes are not charged: %v", err)
-	}
-	// 4096 tiles: 1 MB passes the segments and the images, not the tiles.
-	if _, err := Convert(tiled, Limits{MaxContentBytes: 1_000_000}); !errors.Is(err, ErrLimit) {
-		t.Errorf("a tile's bytes are not charged: %v", err)
+	// 4096 tiles are far more than 100 KB of content, and far less than 4 MiB.
+	if _, err := Convert(tiled, Limits{MaxContentBytes: 100_000}); !errors.Is(err, ErrLimit) {
+		t.Errorf("a tile's bytes are not counted: %v", err)
 	}
 	if _, err := Convert(tiled, Limits{MaxContentBytes: 4 << 20}); err != nil {
 		t.Errorf("4096 tiles within budget: %v", err)
-	}
-	if _, err := Convert(once, Limits{MaxImagePixels: 0}); err != nil {
-		t.Fatal(err)
 	}
 	p := newPkg(page(fmt.Sprintf(secImgPath, "/i.png")))
 	p.extra["i.png"] = bitonal(t, 64)
@@ -261,22 +256,56 @@ func TestSecDashWithinBudget(t *testing.T) {
 	}
 }
 
-// The estimates are charged where they say: each unit, element, tile, dash
-// number and image adds its bytes.
-func TestSecContentCharges(t *testing.T) {
-	c := newConv(t, newPkg(page(``)).bytes(t), Limits{MaxContentBytes: 1000})
-	if err := c.content(1000); err != nil {
-		t.Fatalf("exactly the budget: %v", err)
+// The content bytes are the library's own count, the pages before this one
+// included, and the ceiling is exact.
+func TestSecContentCheckIsExact(t *testing.T) {
+	c := newConv(t, newPkg(page(``)).bytes(t), Limits{})
+	r := &renderer{c: c, p: c.doc.AddPage(pdfkit.NewPageSize(100, 100))}
+	for i := 0; i < 20; i++ {
+		r.p.MoveTo(float64(i), 1)
+		r.p.LineTo(float64(i), 9)
 	}
-	if err := c.content(1); !errors.Is(err, ErrLimit) {
+	n := r.p.ContentLen()
+	if n < 100 {
+		t.Fatalf("a page of 20 lines is %d bytes", n)
+	}
+	c.lim.MaxContentBytes = n
+	if err := r.check(); err != nil {
+		t.Fatalf("exactly the ceiling: %v", err)
+	}
+	c.lim.MaxContentBytes = n - 1
+	if err := r.check(); !errors.Is(err, ErrLimit) {
 		t.Fatalf("one byte over: %v", err)
 	}
-	c = newConv(t, newPkg(page(``)).bytes(t), Limits{MaxContentBytes: 10 * bytesPerUnit})
-	if err := c.work(10); err != nil {
-		t.Fatalf("ten units: %v", err)
+	// The pages already finished count.
+	c.lim.MaxContentBytes = n + 5
+	c.done = 5
+	if err := r.check(); err != nil {
+		t.Fatalf("5 + n against n + 5: %v", err)
 	}
-	if err := c.work(1); !errors.Is(err, ErrLimit) {
-		t.Fatalf("an eleventh unit: %v", err)
+	c.done = 6
+	if err := r.check(); !errors.Is(err, ErrLimit) {
+		t.Fatalf("6 + n against n + 5: %v", err)
+	}
+}
+
+// Every page adds its content to the count of the next.
+func TestSecContentCountsAllPages(t *testing.T) {
+	var body strings.Builder
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&body, `<Path Data="M0,%d L90,%d" Stroke="#000000" StrokeThickness="1"/>`, i, i)
+	}
+	p := newPkg(page(body.String()), page(body.String()), page(body.String()))
+	b := p.bytes(t)
+	if _, err := Convert(b, Limits{}); err != nil {
+		t.Fatal(err)
+	}
+	// One page of 60 lines is more than 2 KB and the three are less than 100 KB.
+	if _, err := Convert(b, Limits{MaxContentBytes: 100_000}); err != nil {
+		t.Fatalf("three pages under the ceiling: %v", err)
+	}
+	if _, err := Convert(b, Limits{MaxContentBytes: 5_000}); !errors.Is(err, ErrLimit) {
+		t.Fatalf("three pages over the ceiling: %v", err)
 	}
 }
 
@@ -314,43 +343,23 @@ func TestSecTIFF16IsRefusedBeforeDecode(t *testing.T) {
 }
 
 // A 36-byte progressive JPEG: image/jpeg allocates the coefficients at the
-// first scan and fails afterwards (540 MiB). It is not decoded at all.
+// first scan and fails afterwards (540 MiB). A JPEG is never decoded here:
+// pdfkit embeds it as it is, and the pixels are charged to no budget because
+// none is allocated.
 func TestSecProgressiveJPEGStubIsNotDecoded(t *testing.T) {
 	for _, n := range []int{1, 3} {
 		p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/p.jpg"), n)))
 		p.extra["p.jpg"] = secProgressiveStub
 		res, err, heap, took := secRun(t, p.bytes(t))
-		if err != nil || len(res.Skipped) == 0 {
+		if err != nil {
 			t.Fatalf("draws=%d: err %v, skipped %v", n, err, res.Skipped)
 		}
 		t.Logf("progressive stub draws=%d: %d bytes, %v, peak heap %d MiB", n, len(secProgressiveStub), took.Round(time.Millisecond), heap)
 		if heap > 100 {
 			t.Errorf("peak heap %d MiB", heap)
 		}
-	}
-}
-
-func TestSecJPEGProgressiveDetection(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		b    []byte
-		want bool
-	}{
-		{"baseline", secStubJPEG, false},
-		{"progressive with a stray byte", secProgressiveStub, true},
-		{"progressive", append([]byte{0xFF, 0xD8}, secProgressiveStub[3:]...), true},
-		{"lossless SOF3 is not progressive here", []byte{0xFF, 0xD8, 0xFF, 0xC3, 0, 4, 0, 0, 0xFF, 0xDA, 0, 2}, false},
-		{"arithmetic progressive SOF10", []byte{0xFF, 0xD8, 0xFF, 0xCA, 0, 4, 0, 0, 0xFF, 0xDA, 0, 2}, true},
-		{"SOF6", []byte{0xFF, 0xD8, 0xFF, 0xC6, 0, 4, 0, 0, 0xFF, 0xDA, 0, 2}, true},
-		{"SOF14", []byte{0xFF, 0xD8, 0xFF, 0xCE, 0, 4, 0, 0, 0xFF, 0xDA, 0, 2}, true},
-		{"after the scan starts nothing counts", []byte{0xFF, 0xD8, 0xFF, 0xDA, 0, 4, 0, 0, 0xFF, 0xC2, 0, 4, 0, 0}, false},
-		{"fill bytes", []byte{0xFF, 0xD8, 0xFF, 0xFF, 0xC2, 0, 4, 0, 0, 0, 0}, true},
-		{"restart and standalone markers", []byte{0xFF, 0xD8, 0xFF, 0xD0, 0xFF, 0x01, 0xFF, 0xC2, 0, 4, 0, 0}, true},
-		{"a segment length below 2 ends it", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0, 1, 0xFF, 0xC2, 0, 4, 0, 0}, false},
-		{"segments are stepped over", []byte{0xFF, 0xD8, 0xFF, 0xFE, 0, 4, 0xFF, 0xC2, 0xFF, 0xC2, 0, 4, 0, 0}, true},
-	} {
-		if got := jpegProgressive(tc.b); got != tc.want {
-			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		if _, err := Convert(p.bytes(t), Limits{MaxDrawnPixels: 1}); err != nil {
+			t.Errorf("a JPEG was charged decoded pixels: %v", err)
 		}
 	}
 }
@@ -418,7 +427,7 @@ func TestSecEmbeddedImagesAreBudgeted(t *testing.T) {
 	p.extra["pad.bin"] = secJunk(total / 250)
 	b := p.bytes(t)
 	_, err, heap, took := secRun(t, b)
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of images drawn") {
+	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of images embedded") {
 		t.Fatalf("seven 32 MiB JPEG parts: %v", err)
 	}
 	t.Logf("embedded images: %d byte package refused after %v, peak heap %d MiB", len(b), took.Round(time.Millisecond), heap)

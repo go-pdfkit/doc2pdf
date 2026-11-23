@@ -99,27 +99,45 @@ func bitonal(t testing.TB, side int) []byte {
 	return buf.Bytes()
 }
 
-// Finding 1: a PNG is decoded again on every draw, so each draw is charged its
-// pixels, not its bytes. 2048 x 2048 is 4.2 million pixels in about 1 KB, and
-// forty draws are 168 million, past the 128 million default.
-func TestSecPNGRedrawIsChargedPerDraw(t *testing.T) {
+// Finding 1: a PNG used to be decoded again on every draw. 2048 x 2048 is 4.2
+// million pixels in about 1 KB, and forty draws were 168 million. It is one
+// handle now: decoded and embedded once, and each draw is the few bytes of its
+// operator, which MaxContentBytes counts.
+func TestSecPNGRedrawIsOneEmbedding(t *testing.T) {
 	data := bitonal(t, 2048)
 	if len(data) > 8<<10 {
 		t.Fatalf("the PNG is %d bytes; the point is that it is small", len(data))
 	}
-	p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/i.png"), 40)))
-	p.extra["i.png"] = data
-	b := p.bytes(t)
-	var err error
-	t0 := time.Now()
-	heap := peakHeap(t, func() { _, err = lim0(t, b) })
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "pixels decoded") {
-		t.Fatalf("forty draws of a 4.2 Mpx PNG at the default limits: %v", err)
+	conv := func(n int) ([]byte, uint64, time.Duration) {
+		p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/i.png"), n)))
+		p.extra["i.png"] = data
+		res, err, heap, took := secRun(t, p.bytes(t))
+		if err != nil {
+			t.Fatalf("%d draws of a 4.2 Mpx PNG at the default limits: %v", n, err)
+		}
+		return res.PDF, heap, took
 	}
-	t.Logf("png redraw: %d byte package refused after %v, peak heap %d MiB", len(b), time.Since(t0).Round(time.Millisecond), heap)
+	one, _, _ := conv(1)
+	forty, heap, took := conv(40)
+	t.Logf("png redraw: 40 draws in %v, peak heap %d MiB, PDF %d then %d bytes", took.Round(time.Millisecond), heap, len(one), len(forty))
 	if heap > 700 {
 		t.Errorf("peak heap %d MiB", heap)
 	}
+	// Thirty-nine more draws add their operators and not 39 images.
+	if len(forty) > len(one)+39*1024 {
+		t.Errorf("40 draws are %d bytes, one is %d: the image is embedded again", len(forty), len(one))
+	}
+}
+
+// The pixels are charged once per image, when it is decoded.
+func TestSecPNGPixelsAreChargedOnce(t *testing.T) {
+	p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/i.png"), 40)))
+	p.extra["i.png"] = bitonal(t, 2048)
+	b := p.bytes(t)
+	if _, err := Convert(b, Limits{MaxDrawnPixels: 2048 * 2048}); err != nil {
+		t.Fatalf("exactly the pixels of one decode: %v", err)
+	}
+	refuses(t, "decode", b, Limits{MaxDrawnPixels: 2048*2048 - 1}, ErrLimit)
 }
 
 // A repeat of an image within the budget is allowed: the charge is a budget,
@@ -132,43 +150,35 @@ func TestSecPNGRedrawWithinBudget(t *testing.T) {
 	}
 }
 
-// The same for the JPEG that pdfkit refuses and image/jpeg accepts (finding
-// 4): it is decoded on every draw and charged for it, and the decoded image is
-// not kept.
-func TestSecJPEGFallbackIsChargedAndNotKept(t *testing.T) {
+// A JPEG with a stray byte before its first marker (finding 4) was the one
+// pdfkit refused and image/jpeg accepted, so it was decoded. pdfkit takes it as
+// it is now: nothing is decoded, whatever the draws.
+func TestSecJPEGWithAStrayByteIsEmbedded(t *testing.T) {
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2048, 2048)), nil); err != nil {
 		t.Fatal(err)
 	}
 	j := buf.Bytes()
 	data := append([]byte{0xFF, 0xD8, 0x00}, j[2:]...) // a stray byte before the first marker
-	if err := (&pdfkitProbe{}).refuses(data); err == nil {
-		t.Fatal("pdfkit now takes the stray-byte JPEG: the fallback is no longer exercised")
-	}
 	p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/j.jpg"), 40)))
 	p.extra["j.jpg"] = data
 	b := p.bytes(t)
 	var err error
 	heap := peakHeap(t, func() { _, err = lim0(t, b) })
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "pixels decoded") {
+	if err != nil {
 		t.Fatalf("forty draws of a 4.2 Mpx fallback JPEG: %v", err)
 	}
-	t.Logf("jpeg fallback: %d byte package, peak heap %d MiB", len(b), heap)
-	if heap > 400 {
+	t.Logf("jpeg with a stray byte: %d byte package, peak heap %d MiB", len(b), heap)
+	if heap > 100 {
 		t.Errorf("peak heap %d MiB", heap)
+	}
+	if _, err := Convert(b, Limits{MaxDrawnPixels: 1}); err != nil {
+		t.Errorf("a JPEG was charged decoded pixels: %v", err)
 	}
 }
 
-// pdfkitProbe asks pdfkit whether it takes some JPEG bytes.
-type pdfkitProbe struct{}
-
-func (*pdfkitProbe) refuses(b []byte) error {
-	doc := pdfkit.New(pdfkit.Options{})
-	return doc.AddPage(pdfkit.NewPageSize(10, 10)).DrawJPEG(b, pdfkit.Rect{Width: 1, Height: 1})
-}
-
-// A TIFF is charged its pixels the same way.
-func TestSecTIFFIsChargedPerDraw(t *testing.T) {
+// A TIFF is charged its pixels the same way, once.
+func TestSecTIFFIsChargedOnce(t *testing.T) {
 	var buf bytes.Buffer
 	if err := tiff.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 100, 100)), nil); err != nil {
 		t.Fatal(err)
@@ -176,10 +186,10 @@ func TestSecTIFFIsChargedPerDraw(t *testing.T) {
 	p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/i.tif"), 4)))
 	p.extra["i.tif"] = buf.Bytes()
 	b := p.bytes(t)
-	if _, err := Convert(b, Limits{MaxDrawnPixels: 40000}); err != nil {
-		t.Fatalf("four draws of 10000 px are exactly 40000: %v", err)
+	if _, err := Convert(b, Limits{MaxDrawnPixels: 10000}); err != nil {
+		t.Fatalf("four draws of one 10000 px image are 10000: %v", err)
 	}
-	refuses(t, "tiff redraw", b, Limits{MaxDrawnPixels: 39999}, ErrLimit)
+	refuses(t, "tiff decode", b, Limits{MaxDrawnPixels: 9999}, ErrLimit)
 }
 
 // A JPEG pdfkit takes is embedded as it is: it costs no pixels.

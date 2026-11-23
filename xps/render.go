@@ -60,30 +60,21 @@ func (c *converter) work(n int) error {
 	if c.spent > c.lim.MaxWork {
 		return limit("drawing work (segments, glyphs, stops and tiles)", c.lim.MaxWork)
 	}
-	return c.content(int64(n) * bytesPerUnit)
+	return nil
 }
 
-// Estimated bytes one unit of work, one drawn element, one tile and one dash
-// number add to the content stream. They are upper estimates of what pdfkit
-// writes (a segment is "123456.789012 123456.789012 l\n", about 30 bytes).
-const (
-	bytesPerUnit    = 32
-	bytesPerElement = 256
-	bytesPerTile    = 400
-	bytesPerDash    = 24
-	bytesPerImage   = 160
-)
-
-// content charges n estimated bytes of page content against MaxContentBytes.
+// check measures the content written so far, on every page, against
+// MaxContentBytes.
 //
 // ⛔ MaxWork counts units, and two segments and a 126-number dash array are one
 // unit apiece to it. The content stream is what is held in memory, so it is
-// what is budgeted, from an estimate per emitted operator until the PDF
-// library reports its own length.
-func (c *converter) content(n int64) error {
-	c.written += n
-	if c.written > c.lim.MaxContentBytes {
-		return limit("bytes of page content", int(min(c.lim.MaxContentBytes, math.MaxInt32)))
+// what is budgeted, and the PDF library reports its own length (ContentLen,
+// O(1)): nothing here estimates it. It is called after every drawn element, so
+// what one element writes past the ceiling is bounded by its own input (MaxTiles
+// tiles, a dash array as long as its attribute), never by the page.
+func (r *renderer) check() error {
+	if r.c.done+r.p.ContentLen() > r.c.lim.MaxContentBytes {
+		return limit("bytes of page content", int(min(r.c.lim.MaxContentBytes, math.MaxInt32)))
 	}
 	return nil
 }
@@ -109,7 +100,9 @@ func (c *converter) page(name string) error {
 	p.Transform(0.75, 0, 0, -0.75, 0, h*0.75)
 	c.pages++
 	r := &renderer{c: c, p: p, part: name}
-	return r.children(root, ctx{sc: r.newScope(nil, root), alpha: 1})
+	err = r.children(root, ctx{sc: r.newScope(nil, root), alpha: 1})
+	c.done += p.ContentLen()
+	return err
 }
 
 // newScope adds n's own Resources, if it has any, to the scope.
@@ -143,13 +136,6 @@ func (r *renderer) newScope(up *scope, n *node) *scope {
 func (r *renderer) children(n *node, cx ctx) error {
 	for _, k := range n.kids {
 		var err error
-		if k.name == "Canvas" || k.name == "Path" || k.name == "Glyphs" {
-			// What every drawn element writes besides its own segments: state,
-			// colours, transforms. Paid on every draw of a page.
-			if err := r.c.content(bytesPerElement); err != nil {
-				return err
-			}
-		}
 		switch k.name {
 		case "Canvas":
 			err = r.canvas(k, cx)
@@ -171,6 +157,10 @@ func (r *renderer) children(n *node, cx ctx) error {
 			if !strings.Contains(k.name, ".") {
 				r.c.note("unknown element")
 			}
+		}
+		// What the element wrote is measured, whatever became of it.
+		if lerr := r.check(); lerr != nil {
+			return lerr
 		}
 		if err != nil {
 			if errors.Is(err, ErrLimit) {
@@ -450,9 +440,6 @@ func (r *renderer) stroke(n *node, g *geometry, br *node, alpha float64) error {
 				pat = append(pat, pat...)
 			}
 			off, _ := finiteNum(n.attr("StrokeDashOffset"))
-			if err := r.c.content(int64(len(pat)) * bytesPerDash); err != nil {
-				return err
-			}
 			r.p.SetDash(pat, off*th)
 			dashed = true
 		}

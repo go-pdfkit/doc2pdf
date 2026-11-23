@@ -6,7 +6,6 @@
 package xps
 
 import (
-	"archive/zip"
 	"bytes"
 	"image"
 	"image/png"
@@ -43,9 +42,8 @@ func TestFractionalTileCount(t *testing.T) {
 	refuses(t, "tiny", tiled(t, "0.5"), Limits{MaxWork: 1 << 30}, ErrLimit)
 }
 
-// The same image drawn again and again is charged every time: the package is
-// small, the output is not.
-func TestImagesDrawnRepeatedlyAreCharged(t *testing.T) {
+// The same image drawn again and again is embedded once, and budgeted once.
+func TestImagesDrawnRepeatedlyAreEmbeddedOnce(t *testing.T) {
 	var body strings.Builder
 	for i := 0; i < 40; i++ {
 		body.WriteString(`<Path Data="M 0,0 L 9,0 9,9 Z"><Path.Fill><ImageBrush ImageSource="/i.png" Viewbox="0,0,1,1" Viewport="0,0,9,9"/></Path.Fill></Path>`)
@@ -61,18 +59,14 @@ func TestImagesDrawnRepeatedlyAreCharged(t *testing.T) {
 	}
 	p.extra["i.png"] = enc.Bytes()
 	b := p.bytes(t)
-	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var total int64
-	for _, f := range zr.File {
-		total += int64(f.UncompressedSize64)
-	}
+	n := int64(enc.Len())
 	if _, err := Convert(b, Limits{}); err != nil {
 		t.Fatalf("under the default: %v", err)
 	}
-	refuses(t, "repeats", b, Limits{MaxEmbeddedBytes: total}, ErrLimit)
+	if _, err := Convert(b, Limits{MaxEmbeddedBytes: n}); err != nil {
+		t.Fatalf("forty draws of one %d byte image: %v", n, err)
+	}
+	refuses(t, "embedding", b, Limits{MaxEmbeddedBytes: n - 1}, ErrLimit)
 }
 
 // A scale that is not a number, or a degenerate viewbox, draws nothing and
