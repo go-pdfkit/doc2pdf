@@ -134,11 +134,28 @@ type Limits struct {
 	// MaxWork is the total of segments, glyphs, gradient stops and tiles drawn,
 	// each charged every time it is drawn, so that a resource referenced a
 	// hundred thousand times is paid for a hundred thousand times. Default 2
-	// million (2097152): a segment is written into an in-memory content stream
-	// as up to some thirty bytes, twice when it is filled and stroked, and the
-	// stream is a growing buffer, so measured peak heap is about 200 MiB per
-	// million units on the worst input; a vector-heavy document can raise it.
+	// million (2097152). It counts units, not bytes: [Limits.MaxContentBytes]
+	// is what bounds the content stream, and a vector-heavy document can raise
+	// both.
 	MaxWork int
+	// MaxContentBytes is an ESTIMATE of the page content written, in bytes,
+	// across all pages: each segment, glyph, stop, tile, dash number and drawn
+	// element is charged the bytes it adds to the in-memory content stream
+	// (a tile is charged 400 bytes, a dash number 24, a segment 32). MaxWork
+	// counts units and cannot see that two segments and a 126-number dash array
+	// are not the same size. Default 48 MiB.
+	MaxContentBytes int64
+	// MaxEmbeddedBytes is the bytes of images embedded, every draw counted: the
+	// PDF holds them, and is then copied once more to be returned. Default 64
+	// MiB.
+	MaxEmbeddedBytes int64
+	// MaxDecodeBytes is the most memory one image decode may be estimated to
+	// need (pixels times a per-pixel cost by format and depth), checked from the
+	// header BEFORE the image is decoded: 24 bytes a pixel for an 8-bit
+	// colour image, 40 for a 16-bit one. A JPEG that is embedded as it is
+	// costs nothing here, and a progressive one that is not is never decoded.
+	// Default 192 MiB.
+	MaxDecodeBytes int64
 	// MaxDrawnPixels is the pixels decoded to draw images, charged on EVERY
 	// draw: a PNG is decoded again each time it is painted, so a 36 million
 	// pixel image painted a thousand times must be refused, not paid for.
@@ -170,6 +187,9 @@ func (l Limits) withDefaults() Limits {
 	def64(&l.MaxPackageBytes, 128<<20)
 	def64(&l.MaxPartBytes, 32<<20)
 	def64(&l.MaxUncompressedBytes, 256<<20)
+	def64(&l.MaxContentBytes, 48<<20)
+	def64(&l.MaxEmbeddedBytes, 64<<20)
+	def64(&l.MaxDecodeBytes, 192<<20)
 	def(&l.MaxParts, 8192)
 	def(&l.MaxRatio, 250)
 	def(&l.MaxPages, 2000)
@@ -261,6 +281,8 @@ type converter struct {
 	// images drawn, repeats included.
 	spent    int
 	embedded int64
+	// written is the estimated bytes of page content so far.
+	written int64
 }
 
 // note counts something that was not drawn.

@@ -13,6 +13,7 @@ package xps
 
 import (
 	"bytes"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"image"
@@ -20,6 +21,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"math/rand"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -51,6 +53,12 @@ func peakHeap(t testing.TB, f func()) uint64 {
 			runtime.ReadMemStats(&m)
 			if m.HeapAlloc > hi.Load() {
 				hi.Store(m.HeapAlloc)
+			}
+			// A regression must show its cost, not take the host down: the
+			// test binary ends well before the machine's memory does.
+			if m.HeapAlloc > 2<<30 {
+				fmt.Fprintf(os.Stderr, "%s: heap passed 2 GiB and was still growing; aborted\n", t.Name())
+				os.Exit(3)
 			}
 			select {
 			case <-stop:
@@ -92,20 +100,21 @@ func bitonal(t testing.TB, side int) []byte {
 }
 
 // Finding 1: a PNG is decoded again on every draw, so each draw is charged its
-// pixels, not its bytes. 4096 x 4096 is 16.7 million pixels in about 1 KB.
+// pixels, not its bytes. 2048 x 2048 is 4.2 million pixels in about 1 KB, and
+// forty draws are 168 million, past the 128 million default.
 func TestSecPNGRedrawIsChargedPerDraw(t *testing.T) {
-	data := bitonal(t, 4096)
+	data := bitonal(t, 2048)
 	if len(data) > 8<<10 {
 		t.Fatalf("the PNG is %d bytes; the point is that it is small", len(data))
 	}
-	p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/i.png"), 12)))
+	p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/i.png"), 40)))
 	p.extra["i.png"] = data
 	b := p.bytes(t)
 	var err error
 	t0 := time.Now()
 	heap := peakHeap(t, func() { _, err = lim0(t, b) })
 	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "pixels decoded") {
-		t.Fatalf("twelve draws of a 16.7 Mpx PNG at the default limits: %v", err)
+		t.Fatalf("forty draws of a 4.2 Mpx PNG at the default limits: %v", err)
 	}
 	t.Logf("png redraw: %d byte package refused after %v, peak heap %d MiB", len(b), time.Since(t0).Round(time.Millisecond), heap)
 	if heap > 700 {
@@ -337,7 +346,7 @@ func TestSecContentStreamBound(t *testing.T) {
 	var err error
 	t0 := time.Now()
 	heap := peakHeap(t, func() { _, err = lim0(t, b) })
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "drawing work") {
+	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of page content") {
 		t.Fatalf("9.6 million segments at the default limits: %v", err)
 	}
 	t.Logf("content stream: %d byte package refused after %v, peak heap %d MiB", len(b), time.Since(t0).Round(time.Millisecond), heap)
@@ -389,12 +398,10 @@ func TestSecCheckAttrCounts(t *testing.T) {
 		{"comment is not a tag", `<a><!-- <x a="1" b="2" c="3" d="4" e="5"/> --></a>`, true},
 		{"cdata is not a tag", `<a><![CDATA[ <x a="1" b="2" c="3" d="4" e="5"/> ]]></a>`, true},
 		{"pi is not a tag", `<?x a="1" b="2" c="3" d="4" e="5"?><a/>`, true},
-		{"doctype is not a tag", `<!DOCTYPE a [ <!ENTITY e "=====">]><a/>`, true},
 		{"after a comment", `<!-- x --><a` + attrs(5) + `/>`, false},
 		{"unterminated comment", `<!--        <x` + attrs(9) + `/>`, true},
 		{"unterminated cdata", `<a><![CDATA[        <x` + attrs(9) + `/>`, true},
 		{"unterminated pi", `<?        <x` + attrs(9) + `/>`, true},
-		{"unterminated doctype", `<!        <x` + attrs(9) + `/>`, true},
 		{"unterminated tag", `<a` + attrs(4), true},
 		{"unterminated tag over", `<a` + attrs(5), false},
 		{"unterminated quote", `<a b="` + attrs(9), true},
@@ -405,6 +412,70 @@ func TestSecCheckAttrCounts(t *testing.T) {
 		}
 		if err != nil && !errors.Is(err, ErrLimit) {
 			t.Errorf("%s: %v is not a limit refusal", tc.name, err)
+		}
+	}
+}
+
+// Second review, finding 2: where a DOCTYPE ends is a matter of quotes that
+// encoding/xml and a byte scan read differently; `<!DOCTYPE a '>' "<!--" >`
+// hid the root element, and six million attributes, from the scan. No `<!`
+// declaration is allowed at all.
+func TestSecDoctypeIsRefused(t *testing.T) {
+	for _, prefix := range []string{
+		`<!DOCTYPE a '>' "<!--" >`,
+		`<!DOCTYPE a [ <!ENTITY e "=====">]>`,
+		`<!DOCTYPE a>`,
+		`<!x`,
+	} {
+		if _, err := parseXML([]byte(prefix+`<a/>`), 8, 100, 100); !errors.Is(err, ErrBadXML) {
+			t.Errorf("%q: %v", prefix, err)
+		}
+	}
+	// And through Convert, with the attributes the prefix was meant to hide.
+	n := 2_000_000
+	pg := `<!DOCTYPE a '>' "<!--" >` + `<FixedPage Width="9" Height="9" ` + strings.Repeat(`a="" `, n) + `/>`
+	p := newPkg(pg)
+	p.extra["pad.bin"] = secJunk(len(pg) / 100)
+	b := p.bytes(t)
+	var err error
+	heap := peakHeap(t, func() { _, err = lim0(t, b) })
+	if !errors.Is(err, ErrBadXML) {
+		t.Fatalf("a hidden attribute bomb: %v", err)
+	}
+	t.Logf("doctype attribute bomb: %d byte package, peak heap %d MiB", len(b), heap)
+	if heap > 120 {
+		t.Errorf("peak heap %d MiB", heap)
+	}
+}
+
+// Whatever the decoder reads as a start tag, the scan must have counted: a
+// tag the decoder returns with more attributes than the limit is a tag the
+// scan refused. The same invariant is the fuzz target FuzzAttrScan.
+func TestSecScanAgreesWithDecoder(t *testing.T) {
+	for _, in := range []string{
+		`<a b="1" c='>' d="2"/>`,
+		`<a b="1"><!-- <x y="1" z="2"/> --><c d="3" e="4" f="5"/></a>`,
+		`<?pi a="1" b="2"?><a b="1" c="2" d="3"/>`,
+		`<a><![CDATA[<x y="1" z="2" w="3"/>]]><b q="1" r="2" s="3" t="4"/></a>`,
+	} {
+		if err := scanAgrees([]byte(in), 2); err != "" {
+			t.Errorf("%q: %s", in, err)
+		}
+	}
+}
+
+// scanAgrees reports "" when checkAttrCounts and encoding/xml agree about a
+// document, and what differs otherwise.
+func scanAgrees(b []byte, max int) string {
+	refused := checkAttrCounts(b, max) != nil
+	dec := xml.NewDecoder(bytes.NewReader(b))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return ""
+		}
+		if st, ok := tok.(xml.StartElement); ok && len(st.Attr) > max && !refused {
+			return fmt.Sprintf("the decoder read %d attributes (limit %d) that the scan let pass", len(st.Attr), max)
 		}
 	}
 }

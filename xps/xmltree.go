@@ -79,8 +79,12 @@ func checkAttrCounts(b []byte, max int) error {
 			i = skip(i+2, "?>")
 			continue
 		case bytes.HasPrefix(rest, []byte("<!")):
-			i = skip(i+2, ">")
-			continue
+			// ⛔ No directive at all. Where a DOCTYPE ends is a matter of quotes
+			// and nested brackets, which encoding/xml reads one way and a byte
+			// scan another: `<!DOCTYPE a '>' "<!--" >` hid the root element from
+			// the scan and let six million attributes through. XPS has no use for
+			// a DOCTYPE, so it is refused instead of stepped over.
+			return fmt.Errorf("%w: a <! declaration (DOCTYPE) is not allowed", ErrBadXML)
 		}
 		n, quote := 0, byte(0)
 		i++

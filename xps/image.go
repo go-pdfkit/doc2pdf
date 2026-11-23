@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"math"
@@ -30,6 +31,69 @@ type imageInfo struct {
 	kind       string // "jpeg", "png" or "tiff"
 	w, h       int
 	dpiX, dpiY float64
+	// cost estimates the memory one decode of the image needs (see
+	// decodeCost); progressive is a JPEG with several scans.
+	cost        int64
+	progressive bool
+}
+
+// decodeCost estimates the bytes one decode of a w*h image needs, from its
+// colour model, before anything is decoded: the decoded samples, the decoder's
+// own working copy (a TIFF strip is inflated whole, a PNG row buffer and
+// image/jpeg coefficient blocks are kept) and the conversion pdfkit makes to
+// draw it. Four times the decoded bytes and eight more per pixel was measured
+// as an upper bound across the 16-bit PNG, the deflate TIFF and a bitonal PNG
+// (see TestSecDecodeCostBoundsMeasured).
+func decodeCost(cfg image.Config) int64 {
+	bpp := int64(4)
+	switch m := cfg.ColorModel.(type) {
+	case color.Palette:
+		bpp = 1
+	default:
+		switch m {
+		case color.GrayModel:
+			bpp = 1
+		case color.Gray16Model:
+			bpp = 2
+		case color.RGBA64Model, color.NRGBA64Model:
+			bpp = 8
+		}
+	}
+	return int64(cfg.Width) * int64(cfg.Height) * (bpp*4 + 8)
+}
+
+// jpegProgressive says whether the JPEG's frame header is a progressive (or
+// lossless, or arithmetic-coded) one: image/jpeg keeps every coefficient block
+// of such an image until the last scan, and allocates them at the FIRST scan,
+// so a 36-byte file declaring the largest image costs the memory of it all.
+// The markers are read as image/jpeg reads them, bytes before the first one
+// skipped.
+func jpegProgressive(b []byte) bool {
+	for i := 2; i+4 <= len(b); {
+		if b[i] != 0xFF {
+			i++
+			continue
+		}
+		m := b[i+1]
+		switch {
+		case m == 0xFF:
+			i++
+			continue
+		case m == 0 || m == 1 || (m >= 0xD0 && m <= 0xD8):
+			i += 2
+			continue
+		case m == 0xDA:
+			return false
+		case m == 0xC2 || m == 0xC6 || m == 0xCA || m == 0xCE:
+			return true
+		}
+		n := int(binary.BigEndian.Uint16(b[i+2:]))
+		if n < 2 {
+			return false
+		}
+		i += 2 + n
+	}
+	return false
 }
 
 // image reads an image part and measures it.
@@ -97,6 +161,8 @@ func (c *converter) readImage(part string) (*imageInfo, error) {
 		return nil, limit("pixels in all images", c.lim.MaxTotalImagePixels)
 	}
 	im.w, im.h = cfg.Width, cfg.Height
+	im.cost = decodeCost(cfg)
+	im.progressive = im.kind == "jpeg" && jpegProgressive(b)
 	if c.images == nil {
 		c.images = map[string]*imageInfo{}
 	}
@@ -174,8 +240,11 @@ func (r *renderer) imageSource(v string) string {
 // units with y down. The image is drawn y-up, so the space is flipped for it.
 func (r *renderer) drawImage(im *imageInfo, x, y, w, h float64) error {
 	r.c.embedded += int64(len(im.data))
-	if r.c.embedded > r.c.lim.MaxUncompressedBytes {
-		return limit("bytes of images drawn", int(min(r.c.lim.MaxUncompressedBytes, math.MaxInt32)))
+	if r.c.embedded > r.c.lim.MaxEmbeddedBytes {
+		return limit("bytes of images drawn", int(min(r.c.lim.MaxEmbeddedBytes, math.MaxInt32)))
+	}
+	if err := r.c.content(bytesPerImage); err != nil {
+		return err
 	}
 	r.p.Save()
 	defer r.p.Restore()
@@ -187,6 +256,15 @@ func (r *renderer) drawImage(im *imageInfo, x, y, w, h float64) error {
 	// pdfkit takes is embedded as it is and costs its bytes only.
 	if im.kind == "jpeg" && r.p.DrawJPEG(im.data, rect) == nil {
 		return nil
+	}
+	// ⛔ Everything that bounds a decode is checked HERE, from the header, before
+	// the decoder allocates: image/jpeg allocates a progressive image's
+	// coefficients at the first scan and fails only afterwards.
+	if im.progressive {
+		return fmt.Errorf("%w: a progressive JPEG pdfkit does not embed is not decoded", ErrBadImage)
+	}
+	if im.cost > r.c.lim.MaxDecodeBytes {
+		return limit("estimated bytes to decode one image", int(min(r.c.lim.MaxDecodeBytes, math.MaxInt32)))
 	}
 	if err := r.chargePixels(im); err != nil {
 		return err
@@ -319,6 +397,16 @@ func (r *renderer) imageBrush(g *geometry, br *node, alpha float64, cx ctx) erro
 	}
 	i0, i1 := math.Floor((x0-vp[0])/vp[2]), math.Ceil((x1-vp[0])/vp[2])-1
 	j0, j1 := math.Floor((y0-vp[1])/vp[3]), math.Ceil((y1-vp[1])/vp[3])-1
+	// ⛔ Tile indices are integers, and bounded as such. As float64 they stop
+	// advancing at 2^53 (i++ changes nothing), where the column count rounds to
+	// one, one unit of work is charged, and the loop never ends: a 1.9 KB file
+	// drew more than 3 GiB. A tile index beyond 2^31 is no tile of any page.
+	const maxIndex = 1 << 31
+	for _, v := range []float64{i0, i1, j0, j1} {
+		if !(math.Abs(v) <= maxIndex) {
+			return limit("tile index in one brush", maxIndex)
+		}
+	}
 	cols, rows := i1-i0+1, j1-j0+1
 	// Compared as floats: the product of two huge counts overflows an int
 	// before it can be refused. Written so that what is not a number, which
@@ -327,18 +415,24 @@ func (r *renderer) imageBrush(g *geometry, br *node, alpha float64, cx ctx) erro
 	if !(cols*rows <= float64(r.c.lim.MaxTiles)) {
 		return limit("tiles in one brush", r.c.lim.MaxTiles)
 	}
-	if err := r.c.work(int(math.Max(cols*rows, 0))); err != nil {
+	n := int(math.Max(cols*rows, 0))
+	if err := r.c.work(n); err != nil {
 		return err
 	}
-	for j := j0; j <= j1; j++ {
-		for i := i0; i <= i1; i++ {
-			a, e := 1.0, i*vp[2]
-			if flipX && math.Mod(math.Abs(i), 2) == 1 {
-				a, e = -1, 2*vp[0]+(i+1)*vp[2]
+	// Every tile is a Save, a Transform, a clip and a draw: charged up front,
+	// so the refusal comes before the first of them.
+	if err := r.c.content(int64(n) * bytesPerTile); err != nil {
+		return err
+	}
+	for j := int64(j0); j <= int64(j1); j++ {
+		for i := int64(i0); i <= int64(i1); i++ {
+			a, e := 1.0, float64(i)*vp[2]
+			if flipX && i&1 != 0 {
+				a, e = -1, 2*vp[0]+float64(i+1)*vp[2]
 			}
-			d, f := 1.0, j*vp[3]
-			if flipY && math.Mod(math.Abs(j), 2) == 1 {
-				d, f = -1, 2*vp[1]+(j+1)*vp[3]
+			d, f := 1.0, float64(j)*vp[3]
+			if flipY && j&1 != 0 {
+				d, f = -1, 2*vp[1]+float64(j+1)*vp[3]
 			}
 			r.p.Save()
 			r.p.Transform(a, 0, 0, d, e, f)

@@ -72,7 +72,7 @@ func TestImagesDrawnRepeatedlyAreCharged(t *testing.T) {
 	if _, err := Convert(b, Limits{}); err != nil {
 		t.Fatalf("under the default: %v", err)
 	}
-	refuses(t, "repeats", b, Limits{MaxUncompressedBytes: total}, ErrLimit)
+	refuses(t, "repeats", b, Limits{MaxEmbeddedBytes: total}, ErrLimit)
 }
 
 // A scale that is not a number, or a degenerate viewbox, draws nothing and

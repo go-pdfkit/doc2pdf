@@ -103,3 +103,28 @@ func FuzzConvert(f *testing.F) {
 		_ = errors.Is(err, ErrLimit)
 	})
 }
+
+// FuzzAttrScan holds the raw attribute scan to the decoder it guards: whatever
+// encoding/xml reads as a start tag with more attributes than the limit, the
+// scan must have refused. (The review found `<!DOCTYPE a '>' "<!--" >`, where
+// the two disagreed about where a declaration ends.)
+func FuzzAttrScan(f *testing.F) {
+	for _, s := range []string{
+		`<a b="1" c='>' d="2"/>`,
+		`<!DOCTYPE a '>' "<!--" ><a b="1" c="2" d="3" e="4"/>`,
+		`<!-- <x a="1"/> --><a b="1" c="2" d="3"/>`,
+		`<![CDATA[ x ]]><a b="1"/>`,
+		`<?pi a="1" b="2"?><a b="1" c="2" d="3"/>`,
+		`<a b="1"><c d="2" e="3" f="4"/></a>`,
+	} {
+		f.Add([]byte(s), 2)
+	}
+	f.Fuzz(func(t *testing.T, b []byte, max int) {
+		if max < 0 || max > 64 {
+			return
+		}
+		if msg := scanAgrees(b, max); msg != "" {
+			t.Fatalf("%q: %s", b, msg)
+		}
+	})
+}
