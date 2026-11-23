@@ -142,23 +142,34 @@ func run(out, errOut interface {
 		return 1
 	}
 
-	doc, err := f.Read(src)
-	if err != nil {
-		// ⛔ Which READER failed, not just that something did. Thirteen
-		// libraries stand behind this command, and "cannot read it" sends
-		// somebody to the wrong one.
-		fmt.Fprintf(errOut, "doc2pdf: %s could not read this %s: %v\n", f.From, f.Name, err)
-		return 1
-	}
-
-	var refused []string
-	pdf, err := document.Write(doc, document.WriteOptions{
-		MarginMm:  o.marginMm,
-		OnRefused: func(u string) { refused = append(refused, u) },
-	})
-	if err != nil {
-		fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
-		return 1
+	var (
+		refused  []string
+		notDrawn []string
+		pdf      []byte
+	)
+	if d, ok := directReaders[f.Name]; ok {
+		pdf, notDrawn, err = d(src)
+		if err != nil {
+			fmt.Fprintf(errOut, "doc2pdf: %s could not read this %s: %v\n", f.From, f.Name, err)
+			return 1
+		}
+	} else {
+		doc, err := f.Read(src)
+		if err != nil {
+			// ⛔ Which READER failed, not just that something did. Thirteen
+			// libraries stand behind this command, and "cannot read it" sends
+			// somebody to the wrong one.
+			fmt.Fprintf(errOut, "doc2pdf: %s could not read this %s: %v\n", f.From, f.Name, err)
+			return 1
+		}
+		pdf, err = document.Write(doc, document.WriteOptions{
+			MarginMm:  o.marginMm,
+			OnRefused: func(u string) { refused = append(refused, u) },
+		})
+		if err != nil {
+			fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
+			return 1
+		}
 	}
 
 	dst := outputName(in, args)
@@ -178,6 +189,9 @@ func run(out, errOut interface {
 	// converted it is the only one who can decide whether that matters.
 	for _, u := range refused {
 		fmt.Fprintf(out, "  not fetched: %s\n", u)
+	}
+	for _, s := range notDrawn {
+		fmt.Fprintf(out, "  not drawn: %s\n", s)
 	}
 	return 0
 }

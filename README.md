@@ -1,7 +1,7 @@
 # doc2pdf
 
 **Any document into a PDF.** Word, Excel, PowerPoint, OpenDocument Text,
-Spreadsheet, Presentation and Graphics, Markdown, reStructuredText, HTML,
+Spreadsheet, Presentation and Graphics, XPS, Markdown, reStructuredText, HTML,
 plain text, CSV, JSON, XML, EPUB, MOBI, FictionBook and email — through the
 [richdoc](https://github.com/go-richdoc/richdoc) document model and
 [go-pdfkit/document](https://github.com/go-pdfkit/document).
@@ -73,6 +73,43 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | OpenDocument Spreadsheet | `.ods` | `go-odf/odf` |
 | OpenDocument Presentation | `.odp` | `go-odf/odf` |
 | OpenDocument Graphics | `.odg` | `go-odf/odf` |
+| XPS / OpenXPS | `.xps` `.oxps` | `go-pdfkit/doc2pdf/xps` |
+
+### XPS and OpenXPS: drawn, not rasterised
+
+XPS is a fixed-layout format, so it does not go through richdoc: the
+`xps` package reads the package (ECMA-388, an Open Packaging Conventions ZIP) and draws each
+page straight onto a PDF page. The output is **vector**: paths stay paths,
+gradients stay shadings, and a `Glyphs` run becomes real text in an **embedded
+font** (the font part, de-obfuscated when it is a `.odttf`), so the text is
+selectable and searchable. Drawn: `Path` (abbreviated and element geometry,
+fill rules, strokes with dashes, caps, joins and miter limit), `Canvas`
+(transform, clip, opacity, resource dictionaries), linear and radial
+gradients, `ImageBrush` with PNG, JPEG and TIFF (including the tile modes),
+`Glyphs` (indices, clusters, advances, offsets, bold and italic simulation,
+right-to-left), and Markup Compatibility fallbacks.
+
+What it does **not** draw is printed, never silent:
+
+```
+page.oxps → page.pdf (XPS, read by go-pdfkit/doc2pdf/xps, 5120 bytes)
+  not drawn: VisualBrush
+```
+
+Not drawn or approximated: `VisualBrush`, `OpacityMask`, gradient spread
+`Reflect` and `Repeat` (drawn as `Pad`), `IsSideways`, TrueType collections,
+JPEG XR images, ICC profiles, remote resource dictionaries, hyperlinks and
+outlines, gradient stop alpha, gradient or image fills on text and strokes
+(the first colour is used), and the `Triangle` line cap.
+
+⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
+`ImageSource` with a scheme, a `..` that leaves the package, or a part that
+is not there is refused. Every size is bounded before it is allocated: package,
+part and total uncompressed bytes, the compression ratio, part count, pages,
+elements and nesting per part, segments per path, glyphs per run, fonts, image
+pixels (read from the header, before any decode), tiles, and an overall work
+budget charged for every draw. A bound that is hit is an error that names it,
+and the file is refused whole.
 
 **What RTF conversion keeps.** Structure: headings, lists, tables, hyperlinks
 (http, https, mailto), footnotes, PNG and JPEG pictures, bold, italic, strike,
@@ -126,7 +163,7 @@ hyphenation and justification are the point and a six-megabyte engine is
 acceptable; reach for this one when CGO-free, `GOOS=js`-capable and keeping
 emphasis, links and tables matter more.
 
-⛔ **Fifteen of the nineteen formats are exercised end to end**, and the test
+⛔ **Sixteen of the twenty formats are exercised end to end**, and the test
 says so by asserting that number against the table. EPUB, MOBI, FictionBook and
 PowerPoint need a real package built as a fixture, which is its own work — a
 known gap recorded rather than an unnoticed one.
