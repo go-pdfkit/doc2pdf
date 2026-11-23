@@ -27,6 +27,19 @@ var imageFormat = format{Name: "HEIF image", Suffixes: []string{".heic", ".heif"
 // implementation limit, 200 inches, which viewers enforce).
 const maxPageSide = 14400
 
+// The bounds of one run on pictures, which are untrusted: each one is a page of the PDF
+// held in memory, and decoding one costs up to eight bytes a pixel.
+const (
+	maxImages      = 256        // pictures in one PDF
+	minDPI, maxDPI = 0.001, 1e6 // the resolutions a page size can be computed from
+)
+
+// Variables only so that a test can lower them to the size of its pictures.
+var (
+	maxImagePixels = int64(1 << 26) // pixels of one picture (67 million: 8192 x 8192)
+	maxTotalPixels = int64(1 << 28)
+)
+
 // writeDocument serialises the document; a variable so a test can make it fail, which
 // a bytes.Buffer never does.
 var writeDocument = func(doc *pdfkit.Document, w io.Writer) error { return doc.Write(w) }
@@ -61,8 +74,14 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 			return 2
 		}
 	}
-	if !(o.dpi > 0) {
-		fmt.Fprintln(errOut, "doc2pdf: --dpi must be above zero")
+	if len(inputs) > maxImages {
+		fmt.Fprintf(errOut, "doc2pdf: %d pictures, at most %d go into one PDF\n", len(inputs), maxImages)
+		return 2
+	}
+	// NaN, the infinities, zero and the negatives fail the comparison; so do the
+	// denormals, which divide a page size into an infinity.
+	if !(o.dpi >= minDPI && o.dpi <= maxDPI) {
+		fmt.Fprintf(errOut, "doc2pdf: --dpi must be between %g and %g\n", minDPI, maxDPI)
 		return 2
 	}
 	if dst == "" {
@@ -74,18 +93,38 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 		return 2
 	}
 
+	limit := imageFormat.MaxInput()
+	if o.maxInput > 0 {
+		limit = o.maxInput
+	}
+	lim := heif.Limits{MaxBytes: limit, MaxPixels: maxImagePixels}
 	doc := pdfkit.New(pdfkit.Options{})
+	var total int64 // pixels of the pictures read so far
 	for _, in := range inputs {
 		src, err := readBounded(in, imageFormat, o.maxInput)
 		if err != nil {
 			fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
 			return 1
 		}
-		img, err := heif.Decode(bytes.NewReader(src))
+		// The size is read before the pixels are, so that a picture that would take the
+		// PDF over its budget is refused without being decoded.
+		cfg, err := heif.DecodeConfigOptions(bytes.NewReader(src), heif.Options{Limits: lim})
 		if err != nil {
 			fmt.Fprintf(errOut, "doc2pdf: %s could not read %s: %v\n", imageFormat.From, in, err)
 			return 1
 		}
+		if total += int64(cfg.Width) * int64(cfg.Height); total > maxTotalPixels {
+			fmt.Fprintf(errOut, "doc2pdf: the pictures hold more than %d pixels together; %s is over it\n", maxTotalPixels, in)
+			return 1
+		}
+		// Each picture is drawn, which compresses it, and then let go: no more than one
+		// decoded picture is alive at a time.
+		res, err := heif.DecodeOptions(bytes.NewReader(src), heif.Options{Limits: lim})
+		if err != nil {
+			fmt.Fprintf(errOut, "doc2pdf: %s could not read %s: %v\n", imageFormat.From, in, err)
+			return 1
+		}
+		img := res.Image
 		b := img.Bounds()
 		w, h := float64(b.Dx())*72/o.dpi, float64(b.Dy())*72/o.dpi
 		if s := max(w, h); s > maxPageSide {

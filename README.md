@@ -87,6 +87,11 @@ doc2pdf photo.heic                          # photo.pdf, one page
 doc2pdf --dpi 300 a.heic b.heic album.pdf   # album.pdf, two pages
 ```
 
+Pictures are untrusted input, so a run is bounded: `--dpi` is between 0.001 and
+1000000 (NaN, infinities and denormals are refused), at most 256 pictures, 67
+million pixels for one and 268 million for all of them, and `--max-input` bytes
+for each file. Over any of them the run stops with an error.
+
 Pictures and documents cannot be joined in one run (exit 2). Only the HEVC
 pictures of a HEIF file are read; alpha, HDR gain maps and image sequences are
 not (see the [go-images/heif README](https://github.com/go-images/heif#not-supported)).

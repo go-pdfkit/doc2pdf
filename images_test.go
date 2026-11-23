@@ -168,6 +168,64 @@ func TestPictureUsageErrors(t *testing.T) {
 	}
 }
 
+// --dpi is a size, so it is refused when it is not a number a page can be computed
+// from: NaN and the infinities, the denormals, and what is below or above the bounds.
+func TestDPIMustBeUsable(t *testing.T) {
+	in := heic(t, "small.heic")
+	for _, dpi := range []string{"NaN", "Inf", "-Inf", "1e-310", "5e-324", "0.0009", "1000001", "1e300", "-0"} {
+		if code, _, errOut := drive(t, "--dpi="+dpi, in); code != 2 || !strings.Contains(errOut, "--dpi must be between") {
+			t.Errorf("--dpi=%s: code %d, %q", dpi, code, errOut)
+		}
+	}
+	for _, dpi := range []string{"0.001", "1000000"} { // exactly at the bounds
+		if code, _, errOut := drive(t, "-f", "--dpi="+dpi, in); code != 0 {
+			t.Errorf("--dpi=%s: code %d, %q", dpi, code, errOut)
+		}
+	}
+}
+
+// One run reads a bounded number of pictures, of a bounded size, and a bounded number of
+// pixels together; each of them refused before the next is decoded.
+func TestPicturesAreBounded(t *testing.T) {
+	in := heic(t, "small.heic")
+	dst := filepath.Join(t.TempDir(), "all.pdf")
+	many := func(n int) []string {
+		args := []string{"-f"}
+		for range n {
+			args = append(args, in)
+		}
+		return append(args, dst)
+	}
+	if code, _, errOut := drive(t, many(maxImages+1)...); code != 2 || !strings.Contains(errOut, "at most 256") {
+		t.Errorf("too many pictures: code %d, %q", code, errOut)
+	}
+	if code, _, errOut := drive(t, many(maxImages)...); code != 0 {
+		t.Errorf("exactly %d pictures: code %d, %q", maxImages, code, errOut)
+	}
+
+	const px = smallW * smallH
+	defer func(a, b int64) { maxImagePixels, maxTotalPixels = a, b }(maxImagePixels, maxTotalPixels)
+	maxTotalPixels = 2 * px
+	if code, _, errOut := drive(t, many(2)...); code != 0 {
+		t.Errorf("pictures at the total: code %d, %q", code, errOut)
+	}
+	if code, _, errOut := drive(t, many(3)...); code != 1 || !strings.Contains(errOut, "pixels together") {
+		t.Errorf("pictures over the total: code %d, %q", code, errOut)
+	}
+	maxTotalPixels = 1 << 28
+	// the decoder counts the pixels of the coded picture: padded to 68x46, and to whole
+	// 64x64 coding tree blocks in the bitstream (160x64)
+	const coded = 160 * 64
+	maxImagePixels = coded
+	if code, _, errOut := drive(t, "-f", in, dst); code != 0 {
+		t.Errorf("a picture at the bound: code %d, %q", code, errOut)
+	}
+	maxImagePixels = coded - 1
+	if code, _, errOut := drive(t, "-f", in, dst); code != 1 || !strings.Contains(errOut, "could not read") {
+		t.Errorf("a picture over the bound: code %d, %q", code, errOut)
+	}
+}
+
 func TestPictureFailuresAreReported(t *testing.T) {
 	good := heic(t, "small.heic")
 	bad := write(t, "bad.heic", []byte("this is not a picture"))
