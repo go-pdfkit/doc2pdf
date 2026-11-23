@@ -102,6 +102,23 @@ JPEG XR images, ICC profiles, remote resource dictionaries, hyperlinks and
 outlines, gradient stop alpha, gradient or image fills on text and strokes
 (the first colour is used), and the `Triangle` line cap.
 
+**Untrusted files, and what they can cost.** An XPS file is a ZIP of XML whose
+author chose every number in it, so every ceiling is a `xps.Limits` field and
+a refusal names what was exceeded. At the **default limits** (what `doc2pdf`
+passes) the peak heap was measured, under a 640 MiB soft memory limit
+(`GOMEMLIMIT`), on the worst input found for each cost: a package of 85 KB that
+asks for ten million path segments peaks at about **400 MiB** (the content
+stream is an in-memory buffer, about 200 MiB per million segments, so
+`MaxWork` defaults to 2 million); 12 draws of a 1.8 KB PNG of 16.7 million
+pixels are refused at 144 MiB and 0.8 s (every draw is charged its pixels,
+`MaxDrawnPixels`, because a PNG is decoded on each draw); sixteen
+case-spelled aliases of one 8 MiB part cost 8 MiB, because a part is cached
+under its real name; four million attributes on one element are refused before
+they are allocated (at most 256 per element, duplicates refused) at 47 MiB.
+Plan on **under 500 MiB** of heap per conversion at the defaults; the figures
+are asserted by `xps/security_test.go`, and a vector-heavy document can raise
+`MaxWork` at about 200 MiB per million segments.
+
 ⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
 `ImageSource` with a scheme, a `..` that leaves the package, or a part that
 is not there is refused. Every size is bounded before it is allocated: package,

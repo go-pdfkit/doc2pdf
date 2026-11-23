@@ -8,6 +8,7 @@ package xps
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -168,6 +169,17 @@ func (r *renderer) maskNote(n *node) {
 	}
 }
 
+// setAlpha sets the constant alpha, rounded to the nearest 1/255.
+//
+// ⛔ pdfkit scans every alpha state a page has used to find the one asked for,
+// so a page that uses N distinct opacities pays N per use: 120000 distinct
+// values took fifteen seconds. 8-bit alpha is all a viewer shows anyway, and
+// this caps the distinct states at 256.
+func (r *renderer) setAlpha(v float64) {
+	v = math.Round(clamp01(v)*255) / 255
+	r.p.SetAlpha(v, v)
+}
+
 // opacity is the Opacity attribute, 1 when absent or unreadable.
 func opacity(n *node) float64 {
 	if v, ok := finiteNum(n.attr("Opacity")); ok {
@@ -320,7 +332,7 @@ func (r *renderer) fill(g *geometry, br *node, alpha float64, cx ctx) error {
 			return nil
 		}
 		r.p.SetFillColor(col)
-		r.p.SetAlpha(v, v)
+		r.setAlpha(v)
 		g.emit(r.p)
 		if g.evenOdd {
 			r.p.FillEvenOdd()
@@ -387,7 +399,7 @@ func (r *renderer) stroke(n *node, g *geometry, br *node, alpha float64) error {
 		return nil
 	}
 	r.p.SetStrokeColor(col)
-	r.p.SetAlpha(v, v)
+	r.setAlpha(v)
 	r.p.SetLineWidth(th)
 
 	dashed := false
@@ -516,7 +528,7 @@ func (r *renderer) gradient(br *node, alpha float64, cx ctx) error {
 	if m, ok := r.matrix(br, "Transform", cx.sc); ok {
 		r.p.Transform(m[0], m[1], m[2], m[3], m[4], m[5])
 	}
-	r.p.SetAlpha(alpha, alpha)
+	r.setAlpha(alpha)
 	pt := func(attr string, d0, d1 float64) (float64, float64, bool) {
 		if !br.has(attr) {
 			return d0, d1, true
@@ -552,7 +564,19 @@ func (r *renderer) gradient(br *node, alpha float64, cx ctx) error {
 		return fmt.Errorf("xps: unreadable radial gradient")
 	}
 	// An ellipse is a circle under a scale of one axis.
+	//
+	// ⛔ Every number handed to the PDF must be finite and sane: a ratio that
+	// underflows (RadiusY 1e-300 over RadiusX 1e9) would divide the centre to
+	// infinity, and the writer would print "Inf" into the file.
 	s := ry / rx
+	if !(s >= 1e-9 && s <= 1e9) {
+		return fmt.Errorf("xps: unusable radial gradient geometry")
+	}
+	for _, v := range []float64{oy / s, cyy / s, ox, cxx, rx} {
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > 1e12 {
+			return fmt.Errorf("xps: unusable radial gradient geometry")
+		}
+	}
 	r.p.Transform(1, 0, 0, s, 0, 0)
 	return r.p.Shade(pdfkit.Shading{X0: ox, Y0: oy / s, X1: cxx, Y1: cyy / s, Stops: stops,
 		ExtendStart: true, ExtendEnd: true, Radial: true, R0: 0, R1: rx})

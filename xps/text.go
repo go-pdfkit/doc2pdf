@@ -91,6 +91,9 @@ func (c *converter) font(base, uri string) (*face, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.retained += int64(len(b)); c.retained > c.lim.MaxUncompressedBytes {
+		return nil, limit("bytes of parts kept", int(min(c.lim.MaxUncompressedBytes, math.MaxInt32)))
+	}
 	if ct := c.pkg.ContentType(name); ct == ctObfuscatedFont || strings.HasSuffix(strings.ToLower(name), ".odttf") {
 		b, _ = deobfuscate(name, b)
 	}
@@ -347,7 +350,7 @@ func (r *renderer) glyphs(n *node, cx ctx) error {
 	v := cx.alpha * opacity(n) * ca
 	r.p.SetFont(f.pf, size)
 	r.p.SetFillColor(col)
-	r.p.SetAlpha(v, v)
+	r.setAlpha(v)
 	if bold {
 		// BoldSimulation (§12.1.5): strokes 1% of the em wider on each side.
 		r.p.SetStrokeColor(col)

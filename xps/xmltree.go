@@ -43,6 +43,70 @@ func (n *node) child(name string) *node {
 	return nil
 }
 
+// maxAttrs is the attributes one element may carry. No XPS element has more
+// than a few dozen; the cap exists because encoding/xml materialises every
+// attribute of a start tag before this package sees any of them.
+const maxAttrs = 256
+
+// checkAttrCounts refuses a start tag with more than max attributes, by
+// scanning the raw bytes BEFORE the decoder allocates for them: a tag is read
+// to its closing '>' outside quotes, and the '=' signs outside quotes are
+// counted. Comments, CDATA, processing instructions and declarations are
+// stepped over, so their contents are not counted as tags. What is malformed
+// is left for the decoder to refuse.
+func checkAttrCounts(b []byte, max int) error {
+	skip := func(i int, end string) int {
+		j := bytes.Index(b[i:], []byte(end))
+		if j < 0 {
+			return len(b)
+		}
+		return i + j + len(end)
+	}
+	for i := 0; i < len(b); {
+		if b[i] != '<' {
+			i++
+			continue
+		}
+		rest := b[i:]
+		switch {
+		case bytes.HasPrefix(rest, []byte("<!--")):
+			i = skip(i+4, "-->")
+			continue
+		case bytes.HasPrefix(rest, []byte("<![CDATA[")):
+			i = skip(i+9, "]]>")
+			continue
+		case bytes.HasPrefix(rest, []byte("<?")):
+			i = skip(i+2, "?>")
+			continue
+		case bytes.HasPrefix(rest, []byte("<!")):
+			i = skip(i+2, ">")
+			continue
+		}
+		n, quote := 0, byte(0)
+		i++
+		for ; i < len(b); i++ {
+			c := b[i]
+			if quote != 0 {
+				if c == quote {
+					quote = 0
+				}
+				continue
+			}
+			if c == '"' || c == '\'' {
+				quote = c
+			} else if c == '=' {
+				if n++; n > max {
+					return limit("attributes on one XML element", max)
+				}
+			} else if c == '>' {
+				i++
+				break
+			}
+		}
+	}
+	return nil
+}
+
 // parseXML builds the tree of one part.
 //
 // ⛔ BOUNDED THREE WAYS, because encoding/xml is bounded in none. Depth is
@@ -52,6 +116,9 @@ func (n *node) child(name string) *node {
 // encoding/xml expands no DTD entity, so there is no billion-laughs here; a
 // reference to one it does not know is a syntax error, which is what is wanted.
 func parseXML(b []byte, maxDepth, maxNodes, maxTokens int) (*node, error) {
+	if err := checkAttrCounts(b, maxAttrs); err != nil {
+		return nil, err
+	}
 	dec := xml.NewDecoder(bytes.NewReader(b))
 	var (
 		root   *node
@@ -86,9 +153,10 @@ func parseXML(b []byte, maxDepth, maxNodes, maxTokens int) (*node, error) {
 					if a.Name.Space == "xmlns" || (a.Name.Space == "" && a.Name.Local == "xmlns") {
 						continue
 					}
-					if _, dup := n.attrs[a.Name.Local]; !dup {
-						n.attrs[a.Name.Local] = a.Value
+					if _, dup := n.attrs[a.Name.Local]; dup {
+						return nil, fmt.Errorf("%w: attribute %q given twice on <%s>", ErrBadXML, a.Name.Local, t.Name.Local)
 					}
+					n.attrs[a.Name.Local] = a.Value
 				}
 			}
 			if len(stack) == 0 {

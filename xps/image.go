@@ -30,7 +30,6 @@ type imageInfo struct {
 	kind       string // "jpeg", "png" or "tiff"
 	w, h       int
 	dpiX, dpiY float64
-	decoded    image.Image
 }
 
 // image reads an image part and measures it.
@@ -42,9 +41,31 @@ func (c *converter) image(part string) (*imageInfo, error) {
 	if im, ok := c.images[part]; ok {
 		return im, nil
 	}
+	if err, bad := c.badImages[part]; bad {
+		return nil, err
+	}
+	im, err := c.readImage(part)
+	if err != nil && !errors.Is(err, ErrLimit) {
+		// A part that failed is remembered as failed, so a thousand brushes
+		// naming it read it once. (A limit refusal ends the conversion.)
+		if c.badImages == nil {
+			c.badImages = map[string]error{}
+		}
+		c.badImages[part] = err
+	}
+	return im, err
+}
+
+// readImage reads and measures an image part not yet in the cache. part is a
+// canonical name (see resolve), so each real part is read and kept once.
+func (c *converter) readImage(part string) (*imageInfo, error) {
 	b, err := c.part(part)
 	if err != nil {
 		return nil, err
+	}
+	// Charged before the part is looked at, and whatever it turns out to be.
+	if c.retained += int64(len(b)); c.retained > c.lim.MaxUncompressedBytes {
+		return nil, limit("bytes of parts kept", int(min(c.lim.MaxUncompressedBytes, math.MaxInt32)))
 	}
 	im := &imageInfo{data: b, dpiX: 96, dpiY: 96}
 	var cfg image.Config
@@ -153,9 +174,6 @@ func (r *renderer) imageSource(v string) string {
 // units with y down. The image is drawn y-up, so the space is flipped for it.
 func (r *renderer) drawImage(im *imageInfo, x, y, w, h float64) error {
 	r.c.embedded += int64(len(im.data))
-	if im.kind == "tiff" {
-		r.c.embedded += int64(im.w) * int64(im.h) * 4
-	}
 	if r.c.embedded > r.c.lim.MaxUncompressedBytes {
 		return limit("bytes of images drawn", int(min(r.c.lim.MaxUncompressedBytes, math.MaxInt32)))
 	}
@@ -163,40 +181,48 @@ func (r *renderer) drawImage(im *imageInfo, x, y, w, h float64) error {
 	defer r.p.Restore()
 	r.p.Transform(1, 0, 0, -1, 0, 0)
 	rect := pdfkit.Rect{X: x, Y: -(y + h), Width: w, Height: h}
-	var err error
-	switch im.kind {
-	case "jpeg":
-		if err = r.p.DrawJPEG(im.data, rect); err != nil {
-			err = r.drawDecoded(im, rect)
-		}
-	case "png":
-		if err = r.p.DrawPNG(im.data, rect); err != nil {
-			err = r.drawDecoded(im, rect)
-		}
-	default:
-		err = r.drawDecoded(im, rect)
+	// ⛔ A PNG or TIFF is decoded and converted to samples on every draw, and a
+	// JPEG pdfkit refuses is decoded the same way: that costs time and a
+	// transient w*h*5 bytes each time, so each draw is charged its pixels. A JPEG
+	// pdfkit takes is embedded as it is and costs its bytes only.
+	if im.kind == "jpeg" && r.p.DrawJPEG(im.data, rect) == nil {
+		return nil
 	}
-	return err
+	if err := r.chargePixels(im); err != nil {
+		return err
+	}
+	return r.drawDecoded(im, rect)
 }
 
-// drawDecoded decodes the image (its size already bounded) and draws the
-// pixels, for what pdfkit does not take as it is.
-func (r *renderer) drawDecoded(im *imageInfo, rect pdfkit.Rect) error {
-	if im.decoded == nil {
-		var err error
-		switch im.kind {
-		case "jpeg":
-			im.decoded, err = jpeg.Decode(bytes.NewReader(im.data))
-		case "png":
-			im.decoded, err = png.Decode(bytes.NewReader(im.data))
-		default:
-			im.decoded, err = tiff.Decode(bytes.NewReader(im.data))
-		}
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrBadImage, err)
-		}
+// chargePixels charges one decoding of the image against MaxDrawnPixels.
+func (r *renderer) chargePixels(im *imageInfo) error {
+	r.c.drawn += int64(im.w) * int64(im.h)
+	if r.c.drawn > int64(r.c.lim.MaxDrawnPixels) {
+		return limit("pixels decoded to draw images", r.c.lim.MaxDrawnPixels)
 	}
-	r.p.DrawImage(im.decoded, rect)
+	return nil
+}
+
+// drawDecoded decodes the image (its size already bounded and charged) and
+// draws the pixels, for what pdfkit does not take as it is. The decoded image
+// is NOT kept: a conversion holds one at a time, not one per part.
+func (r *renderer) drawDecoded(im *imageInfo, rect pdfkit.Rect) error {
+	var (
+		img image.Image
+		err error
+	)
+	switch im.kind {
+	case "jpeg":
+		img, err = jpeg.Decode(bytes.NewReader(im.data))
+	case "png":
+		img, err = png.Decode(bytes.NewReader(im.data))
+	default:
+		img, err = tiff.Decode(bytes.NewReader(im.data))
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrBadImage, err)
+	}
+	r.p.DrawImage(img, rect)
 	return nil
 }
 
@@ -257,7 +283,7 @@ func (r *renderer) imageBrush(g *geometry, br *node, alpha float64, cx ctx) erro
 	if hasM {
 		r.p.Transform(m[0], m[1], m[2], m[3], m[4], m[5])
 	}
-	r.p.SetAlpha(alpha, alpha)
+	r.setAlpha(alpha)
 
 	mode := strings.ToLower(strings.TrimSpace(br.attr("TileMode")))
 	if mode == "" || mode == "none" {

@@ -133,9 +133,17 @@ type Limits struct {
 	MaxFonts int
 	// MaxWork is the total of segments, glyphs, gradient stops and tiles drawn,
 	// each charged every time it is drawn, so that a resource referenced a
-	// hundred thousand times is paid for a hundred thousand times. Default 50
-	// million.
+	// hundred thousand times is paid for a hundred thousand times. Default 2
+	// million (2097152): a segment is written into an in-memory content stream
+	// as up to some thirty bytes, twice when it is filled and stroked, and the
+	// stream is a growing buffer, so measured peak heap is about 200 MiB per
+	// million units on the worst input; a vector-heavy document can raise it.
 	MaxWork int
+	// MaxDrawnPixels is the pixels decoded to draw images, charged on EVERY
+	// draw: a PNG is decoded again each time it is painted, so a 36 million
+	// pixel image painted a thousand times must be refused, not paid for.
+	// Default 128 million.
+	MaxDrawnPixels int
 	// MaxImagePixels is the pixels of one image. Default 36 million.
 	MaxImagePixels int
 	// MaxTotalImagePixels is the pixels of every image, counted once per part.
@@ -170,9 +178,10 @@ func (l Limits) withDefaults() Limits {
 	def(&l.MaxSegmentsPerPath, 100000)
 	def(&l.MaxGlyphsPerRun, 50000)
 	def(&l.MaxFonts, 256)
-	def(&l.MaxWork, 50<<20)
+	def(&l.MaxWork, 2<<20)
 	def(&l.MaxImagePixels, 36<<20)
 	def(&l.MaxTotalImagePixels, 512<<20)
+	def(&l.MaxDrawnPixels, 128<<20)
 	def(&l.MaxTiles, 4096)
 	if l.MaxPageUnits <= 0 {
 		l.MaxPageUnits = 19200
@@ -238,6 +247,16 @@ type converter struct {
 	fonts  map[string]*face
 	images map[string]*imageInfo
 	pixels int
+	// exact and byLower index the package's real part names (see canonical).
+	exact   map[string]bool
+	byLower map[string]string
+	// retained is the bytes of parts kept in the caches, charged once per real
+	// part and against MaxUncompressedBytes; drawn is the pixels decoded to
+	// draw images, every draw included.
+	retained int64
+	drawn    int64
+	// badImages remembers an image part that failed, so that it is read once.
+	badImages map[string]error
 	// spent is the drawing work charged so far, and embedded the bytes of
 	// images drawn, repeats included.
 	spent    int
@@ -310,10 +329,35 @@ func (c *converter) resolve(base, uri string) (string, error) {
 	// package" arrives here as a name inside it; and the root itself, "", is no
 	// part, which Has says.
 	joined = strings.TrimPrefix(joined, "/")
-	if !c.pkg.Has(joined) {
+	real, ok := c.canonical(joined)
+	if !ok {
 		return "", fmt.Errorf("%w: %q is not there", ErrBadPartName, joined)
 	}
-	return joined, nil
+	return real, nil
+}
+
+// canonical is the spelling a part really has in the package, or false when
+// there is no such part.
+//
+// ⛔ opc finds a part case-insensitively, so "/A.png" and "/a.png" are one part
+// read through two names. Every cache (images, fonts) keys on THIS spelling, so
+// forty-eight aliases of one 31 MiB part are one entry and not forty-eight.
+func (c *converter) canonical(name string) (string, bool) {
+	if c.exact == nil {
+		c.exact = map[string]bool{}
+		c.byLower = map[string]string{}
+		for _, p := range c.pkg.Parts() {
+			c.exact[p] = true
+			if _, ok := c.byLower[strings.ToLower(p)]; !ok {
+				c.byLower[strings.ToLower(p)] = p
+			}
+		}
+	}
+	if c.exact[name] {
+		return name, true
+	}
+	real, ok := c.byLower[strings.ToLower(name)]
+	return real, ok
 }
 
 // startPart finds the document sequence: the package's start part, or failing
