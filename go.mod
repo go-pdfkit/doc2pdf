@@ -3,7 +3,7 @@ module github.com/go-pdfkit/doc2pdf
 go 1.27.4
 
 require (
-	github.com/go-images/heif v0.0.0-20261123192242-f64ea4131c2a
+	github.com/go-images/heif v0.0.0-20261125193736-e850663cf042
 	github.com/go-odf/odf v0.11.0
 	github.com/go-ooxml/ooxml v0.8.0
 	github.com/go-ooxml/opc v0.2.1
