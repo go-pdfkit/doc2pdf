@@ -1,9 +1,12 @@
 package xps
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"strings"
 	"testing"
 
@@ -163,6 +166,62 @@ func TestSecStoredBytesAreChargedAtTheirCopies(t *testing.T) {
 	if n1-n0 != (1+outputFactor)*d {
 		t.Errorf("%d more bytes of JPEG cost %d, want %d", d, n1-n0, (1+outputFactor)*d)
 	}
+}
+
+// A font is charged as soon as it is read, and its instruction tables as soon as
+// their sizes are known, each BEFORE the parser looks at it: a part that is no
+// usable font is refused on memory and not read as a bad font.
+func TestSecFontIsChargedBeforeItIsParsed(t *testing.T) {
+	load := func(b []byte, mem int64) error {
+		p := newPkg(page(``))
+		p.extra["Resources/Fonts/t.ttf"] = b
+		c := newConv(t, p.bytes(t), Limits{MaxMemory: mem})
+		_, err := c.font("/Resources/Fonts/t.ttf", "/Resources/Fonts/t.ttf")
+		return err
+	}
+	// Too big for the budget, and a collection the library will not open.
+	big := append([]byte("ttcf"), noise(4_000, 5)...)
+	if err := load(big, 1<<10); !errors.Is(err, ErrLimit) {
+		t.Errorf("a collection larger than the budget: %v", err)
+	}
+	if err := load(big, 1<<20); errors.Is(err, ErrLimit) {
+		t.Errorf("a collection within the budget: %v", err)
+	}
+	// A directory that claims an fpgm of n bytes in a part of 28: held four more
+	// times than it is, 2,000 of them do not fit 1 KiB, one byte of it does.
+	stub := func(n uint32) []byte {
+		d := []byte{0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0}
+		d = append(d, "fpgm"...)
+		d = append(d, 0, 0, 0, 0, 0, 0, 0, 28)
+		return binary.BigEndian.AppendUint32(d, n)
+	}
+	if err := load(stub(2_000), 1<<10); !errors.Is(err, ErrLimit) {
+		t.Errorf("2,000 bytes of instructions in 1 KiB: %v", err)
+	}
+	if err := load(stub(1), 1<<10); errors.Is(err, ErrLimit) {
+		t.Errorf("a stub of one instruction byte: %v", err)
+	}
+}
+
+// The header of a PNG says what its decode will cost; the budget is checked from
+// it before the decoder runs, so a truncated file that would fail to decode is
+// refused on memory, not read as a bad image.
+func TestSecImageDecodeIsChargedBeforeItRuns(t *testing.T) {
+	var enc bytes.Buffer
+	img := image.NewNRGBA(image.Rect(0, 0, 64, 64))
+	copy(img.Pix, noise(len(img.Pix), 9))
+	if err := png.Encode(&enc, img); err != nil {
+		t.Fatal(err)
+	}
+	cut := enc.Bytes()[:enc.Len()*3/4]
+	p := newPkg(page(fmt.Sprintf(secImgPath, "/i.png")))
+	p.extra["i.png"] = cut
+	b := p.bytes(t)
+	// With room the unreadable image is skipped, not an error.
+	if _, err := Convert(b, Limits{}); errors.Is(err, ErrLimit) {
+		t.Fatalf("a truncated PNG with room: %v", err)
+	}
+	refuses(t, "decode", b, Limits{MaxMemory: 120_000}, ErrLimit)
 }
 
 // The tree of a part is charged by the element and the attribute: the smallest
