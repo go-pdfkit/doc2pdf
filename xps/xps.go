@@ -52,6 +52,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"sort"
@@ -143,14 +144,23 @@ type Limits struct {
 	// MaxWork counts units and cannot see that two segments and a
 	// 126-number dash array are not the same size. Default 48 MiB.
 	MaxContentBytes int64
-	// MaxEmbeddedBytes is the bytes of image parts embedded: an image is
-	// registered with the PDF once, however often it is drawn. Default 64 MiB.
-	MaxEmbeddedBytes int64
+	// MaxMemory is the one memory budget of a conversion, in bytes. It is
+	// charged for what the conversion holds: the font parts kept, each image the
+	// PDF library stores (the JPEG as it is; a PNG or TIFF at its worst, three
+	// bytes a pixel, four with an alpha channel, however well it deflates), the
+	// page content as the library counts it, and the output, which copies what
+	// the document holds (so images and content count twice). While an image is
+	// decoded it is also charged for the part and the decode estimate, and that
+	// is released after. Default 192 MiB, which keeps the peak heap under
+	// 400 MiB (see the README).
+	MaxMemory int64
 	// MaxDecodeBytes is the most memory one image decode may be estimated to
 	// need (pixels times a per-pixel cost by format and depth), checked from the
-	// header BEFORE the image is decoded: 24 bytes a pixel for an 8-bit
-	// colour image, 40 for a 16-bit one. A JPEG is embedded as it is and never
-	// decoded, so it costs nothing here. Default 192 MiB.
+	// header BEFORE the image is decoded: 24 bytes a pixel for an 8-bit PNG
+	// colour image, 40 for a 16-bit one, and 32 more for a TIFF, whose reader
+	// inflates a strip through a doubling buffer. A JPEG is embedded as it is and
+	// never decoded, so it costs nothing here. [Limits.MaxMemory] bounds the sum.
+	// Default 192 MiB.
 	MaxDecodeBytes int64
 	// MaxDrawnPixels is the pixels of PNG and TIFF images decoded, in all: each
 	// image is decoded and embedded once, however often it is drawn, so this
@@ -183,7 +193,7 @@ func (l Limits) withDefaults() Limits {
 	def64(&l.MaxPartBytes, 32<<20)
 	def64(&l.MaxUncompressedBytes, 256<<20)
 	def64(&l.MaxContentBytes, 48<<20)
-	def64(&l.MaxEmbeddedBytes, 64<<20)
+	def64(&l.MaxMemory, 192<<20)
 	def64(&l.MaxDecodeBytes, 192<<20)
 	def(&l.MaxParts, 8192)
 	def(&l.MaxRatio, 250)
@@ -265,19 +275,33 @@ type converter struct {
 	// exact and byLower index the package's real part names (see canonical).
 	exact   map[string]bool
 	byLower map[string]string
-	// retained is the bytes of parts kept in the caches, charged once per real
-	// part and against MaxUncompressedBytes; drawn is the pixels decoded to
-	// embed images, once per image.
-	retained int64
-	drawn    int64
+	// drawn is the pixels decoded to embed images, once per image.
+	drawn int64
 	// badImages remembers an image part that failed, so that it is read once.
 	badImages map[string]error
-	// spent is the drawing work charged so far, and embedded the bytes of
-	// images embedded, once per image.
-	spent    int
-	embedded int64
+	// spent is the drawing work charged so far.
+	spent int
 	// done is the content bytes of the pages finished so far.
 	done int64
+	// kept is the font bytes held, and stored the bytes the document holds for
+	// the images embedded: the two charges of MaxMemory that outlast a draw.
+	kept, stored int64
+}
+
+// held is what the conversion holds for good, given the content bytes of the
+// pages so far: the kept parts, the stored images and the content, and the
+// output, which copies the last two.
+func (c *converter) held(content int64) int64 {
+	return c.kept + 2*(c.stored+content)
+}
+
+// fits refuses the conversion when what it holds, plus a transient charge, is
+// more than MaxMemory.
+func (c *converter) fits(content, transient int64) error {
+	if c.held(content)+transient > c.lim.MaxMemory {
+		return limit("bytes of memory held", int(min(c.lim.MaxMemory, math.MaxInt32)))
+	}
+	return nil
 }
 
 // note counts something that was not drawn.
@@ -472,7 +496,10 @@ func (c *converter) run() (*Result, error) {
 			return nil, err
 		}
 	}
+	// The output is as large as the images and the content, which the budget has
+	// charged: a buffer of that size is not grown, and so not doubled.
 	var out bytes.Buffer
+	out.Grow(int(min(c.stored+c.done+64<<10, c.lim.MaxMemory)))
 	err = c.doc.Write(&out)
 	if err == nil {
 		res := &Result{PDF: out.Bytes(), Pages: c.pages}

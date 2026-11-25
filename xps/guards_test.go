@@ -7,6 +7,7 @@ package xps
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/png"
 	"strings"
@@ -59,14 +60,42 @@ func TestImagesDrawnRepeatedlyAreEmbeddedOnce(t *testing.T) {
 	}
 	p.extra["i.png"] = enc.Bytes()
 	b := p.bytes(t)
-	n := int64(enc.Len())
 	if _, err := Convert(b, Limits{}); err != nil {
 		t.Fatalf("under the default: %v", err)
 	}
-	if _, err := Convert(b, Limits{MaxEmbeddedBytes: n}); err != nil {
-		t.Fatalf("forty draws of one %d byte image: %v", n, err)
+	// Forty draws cost what one does: the smallest budget that converts is the
+	// same for one draw as for forty, and one byte less refuses.
+	one := newPkg(page(`<Path Data="M 0,0 L 9,0 9,9 Z"><Path.Fill><ImageBrush ImageSource="/i.png" Viewbox="0,0,1,1" Viewport="0,0,9,9"/></Path.Fill></Path>`))
+	one.extra["i.png"] = enc.Bytes()
+	n40, n1 := minMemory(t, b), minMemory(t, one.bytes(t))
+	if n40 > n1+1<<16 {
+		t.Errorf("forty draws need %d bytes of memory, one needs %d", n40, n1)
 	}
-	refuses(t, "embedding", b, Limits{MaxEmbeddedBytes: n - 1}, ErrLimit)
+	if floor := 2 * 64 * 64 * 4; n40 < int64(floor) {
+		t.Errorf("an image stored at %d bytes fits in %d", floor, n40)
+	}
+}
+
+// minMemory is the smallest MaxMemory at which b converts, found by bisection,
+// and it checks that one byte less is refused as a limit.
+func minMemory(t *testing.T, b []byte) int64 {
+	t.Helper()
+	lo, hi := int64(1), int64(192<<20)
+	if _, err := Convert(b, Limits{MaxMemory: hi}); err != nil {
+		t.Fatalf("not even %d bytes of memory is enough: %v", hi, err)
+	}
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if _, err := Convert(b, Limits{MaxMemory: mid}); err == nil {
+			hi = mid
+		} else if errors.Is(err, ErrLimit) {
+			lo = mid + 1
+		} else {
+			t.Fatalf("MaxMemory %d: %v", mid, err)
+		}
+	}
+	refuses(t, "memory", b, Limits{MaxMemory: lo - 1}, ErrLimit)
+	return lo
 }
 
 // A scale that is not a number, or a degenerate viewbox, draws nothing and

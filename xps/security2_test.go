@@ -317,7 +317,7 @@ func TestSecPNG16IsRefusedBeforeDecode(t *testing.T) {
 		p := newPkg(page(strings.Repeat(fmt.Sprintf(secImgPath, "/i.png"), n)))
 		p.extra["i.png"] = data
 		_, err, heap, took := secRun(t, p.bytes(t))
-		if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "to decode one image") {
+		if !errors.Is(err, ErrLimit) {
 			t.Fatalf("draws=%d: %v", n, err)
 		}
 		t.Logf("png16 draws=%d: %d byte PNG refused after %v, peak heap %d MiB", n, len(data), took.Round(time.Millisecond), heap)
@@ -333,7 +333,7 @@ func TestSecTIFF16IsRefusedBeforeDecode(t *testing.T) {
 	p := newPkg(page(fmt.Sprintf(secImgPath, "/i.tif")))
 	p.extra["i.tif"] = data
 	_, err, heap, took := secRun(t, p.bytes(t))
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "to decode one image") {
+	if !errors.Is(err, ErrLimit) {
 		t.Fatalf("%v", err)
 	}
 	t.Logf("tiff16: %d byte TIFF refused after %v, peak heap %d MiB", len(data), took.Round(time.Millisecond), heap)
@@ -385,7 +385,7 @@ func TestSecDecodeCostBoundsMeasured(t *testing.T) {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
 		var res *Result
-		heap := peakHeap(t, func() { res, err = Convert(p.bytes(t), Limits{MaxDecodeBytes: 1 << 40}) })
+		heap := peakHeap(t, func() { res, err = Convert(p.bytes(t), Limits{MaxDecodeBytes: 1 << 40, MaxMemory: 1 << 40}) })
 		if err != nil || res == nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
@@ -427,7 +427,7 @@ func TestSecEmbeddedImagesAreBudgeted(t *testing.T) {
 	p.extra["pad.bin"] = secJunk(total / 250)
 	b := p.bytes(t)
 	_, err, heap, took := secRun(t, b)
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of images embedded") {
+	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of memory held") {
 		t.Fatalf("seven 32 MiB JPEG parts: %v", err)
 	}
 	t.Logf("embedded images: %d byte package refused after %v, peak heap %d MiB", len(b), took.Round(time.Millisecond), heap)

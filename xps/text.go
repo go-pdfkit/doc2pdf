@@ -91,8 +91,11 @@ func (c *converter) font(base, uri string) (*face, error) {
 	if err != nil {
 		return nil, err
 	}
-	if c.retained += int64(len(b)); c.retained > c.lim.MaxUncompressedBytes {
-		return nil, limit("bytes of parts kept", int(min(c.lim.MaxUncompressedBytes, math.MaxInt32)))
+	// A font is kept for the whole conversion: its bytes are charged to the
+	// memory budget, whatever the part turns out to be.
+	c.kept += int64(len(b))
+	if err := c.fits(c.done, 0); err != nil {
+		return nil, err
 	}
 	if ct := c.pkg.ContentType(name); ct == ctObfuscatedFont || strings.HasSuffix(strings.ToLower(name), ".odttf") {
 		b, _ = deobfuscate(name, b)

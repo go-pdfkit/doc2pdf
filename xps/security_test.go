@@ -307,19 +307,20 @@ func TestSecCaseAliasRetention(t *testing.T) {
 	}
 }
 
-// The retained bytes of images and fonts are charged against one budget,
-// whatever the package's own ceiling says.
+// The bytes of a font are charged against the memory budget, and an image part
+// is not kept at all until it is drawn.
 func TestSecRetainedBytesAreCharged(t *testing.T) {
 	p := newPkg(page(``)).withFont()
 	p.extra["big.png"] = append(pngHeader(1, 1), make([]byte, 2<<20)...)
 	b := p.bytes(t)
-	c := newConv(t, b, Limits{MaxUncompressedBytes: 1 << 20})
-	if _, err := c.image("big.png"); !errors.Is(err, ErrLimit) {
-		t.Fatalf("a 2 MiB image under a 1 MiB budget: %v", err)
-	}
-	c = newConv(t, b, Limits{MaxUncompressedBytes: 1 << 10})
+	c := newConv(t, b, Limits{MaxMemory: 1 << 10})
 	if _, err := c.font("/Resources/Fonts/go.ttf", "/Resources/Fonts/go.ttf"); !errors.Is(err, ErrLimit) {
 		t.Fatalf("a font larger than the budget: %v", err)
+	}
+	c = newConv(t, b, Limits{MaxMemory: 1 << 10})
+	c.image("big.png")
+	if c.kept != 0 {
+		t.Errorf("an image that is not drawn holds %d bytes", c.kept)
 	}
 }
 

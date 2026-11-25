@@ -73,10 +73,17 @@ func (c *converter) work(n int) error {
 // what one element writes past the ceiling is bounded by its own input (MaxTiles
 // tiles, a dash array as long as its attribute), never by the page.
 func (r *renderer) check() error {
-	if r.c.done+r.p.ContentLen() > r.c.lim.MaxContentBytes {
+	content := r.c.done + r.p.ContentLen()
+	if content > r.c.lim.MaxContentBytes {
 		return limit("bytes of page content", int(min(r.c.lim.MaxContentBytes, math.MaxInt32)))
 	}
-	return nil
+	return r.c.fits(content, 0)
+}
+
+// fits is the memory budget, with the content written so far and a transient
+// charge on top.
+func (r *renderer) fits(transient int64) error {
+	return r.c.fits(r.c.done+r.p.ContentLen(), transient)
 }
 
 // page draws one FixedPage part as the next page of the document.

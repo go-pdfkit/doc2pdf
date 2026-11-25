@@ -26,13 +26,17 @@ import (
 var errUnsupportedImage = errors.New("xps: unsupported image format")
 
 // An imageInfo is one image part, measured before anything is decoded.
+//
+// ⛔ It keeps no bytes of the part: the part is read again when the image is
+// embedded, so an image that is never drawn, or drawn once, holds nothing.
 type imageInfo struct {
-	data       []byte
+	part       string // the canonical part name
 	kind       string // "jpeg", "png" or "tiff"
 	w, h       int
 	dpiX, dpiY float64
-	// cost estimates the memory one decode of the image needs (see decodeCost).
-	cost int64
+	// cost estimates the memory one decode of the image needs (see decodeCost),
+	// and stored the most the PDF library keeps for it (see storedBound).
+	cost, stored int64
 	// handle is the image in the PDF, made at the first draw; err is why it
 	// could not be (a limit is not kept).
 	handle *pdfkit.Image
@@ -44,10 +48,18 @@ type imageInfo struct {
 // own working copy (a TIFF strip is inflated whole, a PNG row buffer and
 // image/jpeg coefficient blocks are kept) and the conversion pdfkit makes to
 // draw it. Four times the decoded bytes and sixteen more per pixel is an upper
-// bound across the 16-bit PNG, the deflate TIFF and a bitonal PNG, with the race
-// detector too (eight more was passed by 2 MiB under -race, CI 2026-11-23; see
-// TestSecDecodeCostBoundsMeasured).
-func decodeCost(cfg image.Config) int64 {
+// bound across the 16-bit PNG and a bitonal PNG, with the race detector too
+// (eight more was passed by 2 MiB under -race, CI 2026-11-23; see
+// TestSecDecodeCostBoundsMeasured). A TIFF costs thirty-two more again: its
+// reader inflates a strip into a buffer that doubles, up to 8 bytes a pixel
+// whatever the colour model (x/image/tiff reader.go), and an 8-bit gray deflate
+// TIFF of 3170 x 3170 measured 251 MiB (368 under -race) where this was 190
+// (TestSecTIFFDecodeCost).
+func decodeCost(cfg image.Config, kind string) int64 {
+	extra := int64(16)
+	if kind == "tiff" {
+		extra = 48
+	}
 	bpp := int64(4)
 	switch m := cfg.ColorModel.(type) {
 	case color.Palette:
@@ -62,8 +74,39 @@ func decodeCost(cfg image.Config) int64 {
 			bpp = 8
 		}
 	}
-	return int64(cfg.Width) * int64(cfg.Height) * (bpp*4 + 16)
+	return int64(cfg.Width) * int64(cfg.Height) * (bpp*4 + extra)
 }
+
+// storedBound is the most the PDF library keeps for a decoded PNG or TIFF: it
+// stores the samples as 8-bit RGB, deflated, plus an alpha plane when the model
+// has one, and deflate can do no better than the samples on noise. That is what
+// is charged, and not the size of the part, which a paletted noise PNG makes a
+// third of it.
+func storedBound(cfg image.Config) int64 {
+	per := int64(3)
+	switch m := cfg.ColorModel.(type) {
+	case color.Palette:
+		for _, c := range m {
+			if _, _, _, a := c.RGBA(); a != 0xFFFF {
+				per = 4
+			}
+		}
+	default:
+		switch m {
+		case color.GrayModel, color.Gray16Model, color.YCbCrModel, color.CMYKModel:
+		default:
+			per = 4
+		}
+	}
+	return int64(cfg.Width) * int64(cfg.Height) * per
+}
+
+// jpegMaxPixelsPerByte is the most pixels a JPEG may declare per byte of file.
+// pdfkit reads only the frame header of a JPEG and embeds the rest unread, so a
+// 36-byte file can declare 36 million pixels and leave the reader to build them.
+// A blank 4:2:0 image costs about three bytes per 256 pixels (85 a byte), so
+// 1024 is twelve times the best a real encoder does.
+const jpegMaxPixelsPerByte = 1024
 
 // image reads an image part and measures it.
 //
@@ -96,11 +139,7 @@ func (c *converter) readImage(part string) (*imageInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Charged before the part is looked at, and whatever it turns out to be.
-	if c.retained += int64(len(b)); c.retained > c.lim.MaxUncompressedBytes {
-		return nil, limit("bytes of parts kept", int(min(c.lim.MaxUncompressedBytes, math.MaxInt32)))
-	}
-	im := &imageInfo{data: b, dpiX: 96, dpiY: 96}
+	im := &imageInfo{part: part, dpiX: 96, dpiY: 96}
 	var cfg image.Config
 	switch {
 	case bytes.HasPrefix(b, []byte{0xFF, 0xD8}):
@@ -129,8 +168,16 @@ func (c *converter) readImage(part string) (*imageInfo, error) {
 	if c.pixels += int(px); c.pixels > c.lim.MaxTotalImagePixels {
 		return nil, limit("pixels in all images", c.lim.MaxTotalImagePixels)
 	}
+	if im.kind == "jpeg" {
+		im.stored = int64(len(b))
+		if px > jpegMaxPixelsPerByte*int64(len(b)) {
+			return nil, fmt.Errorf("%w: %s declares %d pixels in %d bytes", ErrBadImage, part, px, len(b))
+		}
+	} else {
+		im.stored = storedBound(cfg)
+	}
 	im.w, im.h = cfg.Width, cfg.Height
-	im.cost = decodeCost(cfg)
+	im.cost = decodeCost(cfg, im.kind)
 	if c.images == nil {
 		c.images = map[string]*imageInfo{}
 	}
@@ -245,19 +292,26 @@ func (r *renderer) register(im *imageInfo) (*pdfkit.Image, error) {
 // embed registers the image with the document: a JPEG pdfkit takes as it is,
 // otherwise the decoded pixels.
 func (r *renderer) embed(im *imageInfo) (*pdfkit.Image, error) {
-	r.c.embedded += int64(len(im.data))
-	if r.c.embedded > r.c.lim.MaxEmbeddedBytes {
-		return nil, limit("bytes of images embedded", int(min(r.c.lim.MaxEmbeddedBytes, math.MaxInt32)))
+	// ⛔ The memory budget: this image's part is read now and held while it is
+	// embedded, a PNG or TIFF is decoded on top of that, and what the document
+	// stores for it is held to the end (and copied into the output).
+	if err := r.fits(2 * im.stored); err != nil {
+		return nil, err
+	}
+	b, err := r.c.part(im.part)
+	if err != nil {
+		return nil, err
 	}
 	// ⛔ A JPEG is embedded as it is and never decoded here: image/jpeg allocates
 	// a progressive image's coefficients at the first scan (a 36-byte file cost
 	// 540 MiB), and pdfkit takes the files image/jpeg takes, progressive and
 	// stray bytes included.
 	if im.kind == "jpeg" {
-		h, err := r.c.doc.AddJPEG(im.data)
+		h, err := r.c.doc.AddJPEG(b)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrBadImage, err)
 		}
+		r.c.stored += im.stored
 		return h, nil
 	}
 	// ⛔ Everything that bounds a decode is checked HERE, from the header, before
@@ -265,24 +319,27 @@ func (r *renderer) embed(im *imageInfo) (*pdfkit.Image, error) {
 	if im.cost > r.c.lim.MaxDecodeBytes {
 		return nil, limit("estimated bytes to decode one image", int(min(r.c.lim.MaxDecodeBytes, math.MaxInt32)))
 	}
+	// The part, the decode and the stored copy, all at once.
+	if err := r.fits(int64(len(b)) + im.cost + 2*im.stored); err != nil {
+		return nil, err
+	}
 	r.c.drawn += int64(im.w) * int64(im.h)
 	if r.c.drawn > int64(r.c.lim.MaxDrawnPixels) {
 		return nil, limit("pixels decoded to draw images", r.c.lim.MaxDrawnPixels)
 	}
-	var (
-		img image.Image
-		err error
-	)
+	var img image.Image
 	switch im.kind {
 	case "png":
-		img, err = png.Decode(bytes.NewReader(im.data))
+		img, err = png.Decode(bytes.NewReader(b))
 	default:
-		img, err = tiff.Decode(bytes.NewReader(im.data))
+		img, err = tiff.Decode(bytes.NewReader(b))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadImage, err)
 	}
-	// The decoded image is not kept: the handle holds the compressed samples.
+	// The decoded image and the part are not kept: the handle holds the
+	// compressed samples, charged at their worst.
+	r.c.stored += im.stored
 	return r.c.doc.AddImage(img), nil
 }
 

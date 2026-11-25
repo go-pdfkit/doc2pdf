@@ -112,22 +112,33 @@ content stream is an in-memory buffer, so it is budgeted in bytes,
 `MaxContentBytes`, 48 MiB, as the PDF library counts them after every drawn
 element, since a dash array of 126 long numbers is as many bytes as a hundred
 segments); a dashed-path bomb is refused at 244 MiB, a tile bomb at 153 MiB,
-seven 32 MiB JPEG parts at 140 MiB (`MaxEmbeddedBytes`, 64 MiB, counted once
-per image: an image is registered with the PDF once however often it is drawn,
-and forty draws of a 2048 x 2048 PNG cost 21 MiB); a PNG or TIFF has its
-decode memory estimated from the header BEFORE it is decoded (`MaxDecodeBytes`,
-192 MiB: 24 bytes a pixel for 8-bit colour, 40 for 16-bit) and is charged its
-pixels once (`MaxDrawnPixels`); a JPEG is embedded as it is and never decoded
-here, progressive ones included; tile indices beyond 2^31 are refused;
+seven 32 MiB JPEG parts at 140 MiB. All of the memory a conversion holds is
+ONE budget, `MaxMemory` (192 MiB), because separate ceilings added up (the
+third review stacked them to 901 MiB on a 60 MB package). It is charged the
+font parts kept, each embedded image at what the PDF library stores (a JPEG as
+it is, at most 1024 declared pixels a byte, so a 36-byte stub declaring
+6000 x 6000 is refused; a PNG or TIFF at 3 bytes a pixel, 4 with alpha), the
+page content (`ContentLen`) and the output, which copies the last two, so
+images and content count twice. An image part nothing draws is not kept, and an
+image drawn forty times is stored once. A PNG or TIFF has its decode memory
+estimated from the header BEFORE it is decoded (`MaxDecodeBytes`, 192 MiB: 24
+bytes a pixel for 8-bit colour, 40 for 16-bit, 16 more for a TIFF, whose
+reader inflates a strip into a doubling buffer), charged for the decode only
+and released, and is charged its pixels once (`MaxDrawnPixels`); a JPEG is
+embedded as it is and never decoded here, progressive ones included; tile
+indices beyond 2^31 are refused;
 sixteen case-spelled aliases of one 8 MiB part cost 8 MiB, because a part is
 cached under its real name; a `<!DOCTYPE>` is refused (the attribute scan and
 `encoding/xml` disagreed about where one ends), and four million attributes on
 one element are refused before they are allocated (at most 256 per element,
-duplicates refused) at 19 MiB. **No probe of the two security reviews exceeded
-250 MiB** at the defaults, and `xps/security2_test.go` fails any of them above
-400 MiB. That is a measurement on those inputs, not a proof: an element is
-measured after it is written, so it overshoots the content budget by what one
-element can write, and the kept parts (`MaxUncompressedBytes`, 256 MiB) come on top of it.
+duplicates refused) at 19 MiB. **No probe of the three security reviews exceeded
+250 MiB** at the defaults (the third review's inputs, at most 220 MiB under
+`-race`), and `xps/security2_test.go` and `xps/security3_test.go` fail any of
+them above **400 MiB** (`worstPeakMiB`), which is the bound the tests assert.
+That is a measurement on those inputs, not a proof: an element is measured
+after it is written, so it overshoots the content budget by what one element
+can write, the stored size of an image is the library's worst case and not read
+from it, and a part is read again when it is embedded.
 
 ⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
 `ImageSource` with a scheme, a `..` that leaves the package, or a part that
