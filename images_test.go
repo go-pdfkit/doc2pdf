@@ -184,6 +184,20 @@ func TestDPIMustBeUsable(t *testing.T) {
 	}
 }
 
+// --max-input at the largest value would make the read's one byte more wrap: it is
+// refused for pictures as it is for the other formats, and one below it is read.
+func TestMaxInputOfAPictureIsBounded(t *testing.T) {
+	in := heic(t, "small.heic")
+	for _, v := range []string{"9223372036854775807", "0", "-1"} {
+		if code, _, errOut := drive(t, "--max-input="+v, in); code != 2 || !strings.Contains(errOut, "--max-input") {
+			t.Errorf("--max-input=%s: code %d, %q", v, code, errOut)
+		}
+	}
+	if code, _, errOut := drive(t, "-f", "--max-input=9223372036854775806", in); code != 0 {
+		t.Errorf("--max-input one below the largest: code %d, %q", code, errOut)
+	}
+}
+
 // One run reads a bounded number of pictures, of a bounded size, and a bounded number of
 // pixels together; each of them refused before the next is decoded.
 func TestPicturesAreBounded(t *testing.T) {
