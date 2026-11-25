@@ -43,9 +43,10 @@ type imageInfo struct {
 // colour model, before anything is decoded: the decoded samples, the decoder's
 // own working copy (a TIFF strip is inflated whole, a PNG row buffer and
 // image/jpeg coefficient blocks are kept) and the conversion pdfkit makes to
-// draw it. Four times the decoded bytes and eight more per pixel was measured
-// as an upper bound across the 16-bit PNG, the deflate TIFF and a bitonal PNG
-// (see TestSecDecodeCostBoundsMeasured).
+// draw it. Four times the decoded bytes and sixteen more per pixel is an upper
+// bound across the 16-bit PNG, the deflate TIFF and a bitonal PNG, with the race
+// detector too (eight more was passed by 2 MiB under -race, CI 2026-11-23; see
+// TestSecDecodeCostBoundsMeasured).
 func decodeCost(cfg image.Config) int64 {
 	bpp := int64(4)
 	switch m := cfg.ColorModel.(type) {
@@ -61,7 +62,7 @@ func decodeCost(cfg image.Config) int64 {
 			bpp = 8
 		}
 	}
-	return int64(cfg.Width) * int64(cfg.Height) * (bpp*4 + 8)
+	return int64(cfg.Width) * int64(cfg.Height) * (bpp*4 + 16)
 }
 
 // image reads an image part and measures it.
