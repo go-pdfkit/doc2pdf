@@ -148,8 +148,10 @@ type Limits struct {
 	// charged for what the conversion holds: the font parts kept, each image the
 	// PDF library stores (the JPEG as it is; a PNG or TIFF at its worst, three
 	// bytes a pixel, four with an alpha channel, however well it deflates), the
-	// page content as the library counts it, and the output, which copies what
-	// the document holds (so images and content count twice). While an image is
+	// page content as the library counts it, and the output, which the library
+	// builds in a buffer that doubles and this package copies (so images and
+	// content count five times), and for a font its instruction tables
+	// (fpgm, prep, cvt: 1 MiB at most) four times more. While an image is
 	// decoded it is also charged for the part and the decode estimate, and that
 	// is released after. Default 192 MiB, which keeps the peak heap under
 	// 400 MiB (see the README).
@@ -288,11 +290,21 @@ type converter struct {
 	kept, stored int64
 }
 
+// outputFactor is how many more times the PDF is held while it is written than
+// the images and content the document stores. pdfkit v0.26.0 builds the whole
+// file in a bytes.Buffer it does not size (document.go, Write), so the buffer
+// doubles as it grows (up to twice its final size, with the old one still
+// uncollected) and this package copies it once more into the result: four
+// copies on top of the one the document holds (555 MiB measured for 96 MiB of
+// JPEG parts, TestSecPeakJPEGDoubling). It goes when pdfkit writes to its
+// writer as it goes and the output is streamed.
+const outputFactor = 4
+
 // held is what the conversion holds for good, given the content bytes of the
-// pages so far: the kept parts, the stored images and the content, and the
-// output, which copies the last two.
+// pages so far: the kept parts, and the stored images and the content, once
+// for the document and outputFactor times for the output.
 func (c *converter) held(content int64) int64 {
-	return c.kept + 2*(c.stored+content)
+	return c.kept + (1+outputFactor)*(c.stored+content)
 }
 
 // fits refuses the conversion when what it holds, plus a transient charge, is
@@ -329,7 +341,13 @@ func (c *converter) xmlPart(name string) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
-	n, err := parseXML(b, c.lim.MaxDepth, c.lim.MaxElementsPerPart, 8*c.lim.MaxElementsPerPart)
+	// ⛔ The tree is held beside the part's bytes and what the conversion holds
+	// already: whatever is left of the memory budget is all it may take.
+	left := c.lim.MaxMemory - c.held(c.done) - int64(len(b))
+	if left <= 0 {
+		return nil, limit("bytes of memory held", int(min(c.lim.MaxMemory, math.MaxInt32)))
+	}
+	n, err := parseXMLWithin(b, c.lim.MaxDepth, c.lim.MaxElementsPerPart, 8*c.lim.MaxElementsPerPart, left)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}

@@ -182,7 +182,7 @@ func TestSecTileContentIsBytesBudgeted(t *testing.T) {
 	p := newPkg(page(strings.Repeat(one, 505)))
 	p.extra["j.jpg"] = secStubJPEG
 	_, err, heap, took := secRun(t, p.bytes(t))
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of page content") {
+	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of ") { // the content ceiling or, five copies of it, the memory budget
 		t.Fatalf("505 paths of 4096 tiles: %v", err)
 	}
 	t.Logf("tile content: refused after %v, peak heap %d MiB", took.Round(time.Millisecond), heap)
@@ -238,7 +238,7 @@ func TestSecDashContentIsBytesBudgeted(t *testing.T) {
 	p.extra["pad.bin"] = secJunk(3 * len(pg) / 250)
 	b := p.bytes(t)
 	_, err, heap, took := secRun(t, b)
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of page content") {
+	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of ") { // the content ceiling or, five copies of it, the memory budget
 		t.Fatalf("%d dashed paths: %v", perPage, err)
 	}
 	t.Logf("dash content: %d byte package refused after %v, peak heap %d MiB", len(b), took.Round(time.Millisecond), heap)

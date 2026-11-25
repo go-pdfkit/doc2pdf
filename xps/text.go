@@ -7,6 +7,7 @@ package xps
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -58,6 +59,30 @@ func deobfuscate(name string, b []byte) ([]byte, bool) {
 	return out, true
 }
 
+// maxFontInstructions bounds the TrueType instruction tables (fpgm, prep, cvt)
+// of one font, 1 MiB. The tables hinting needs are measured in kilobytes (Go
+// Regular carries 4 KiB of them, the long hinted Latin and CJK fonts a few
+// hundred KiB at most); more is data nobody executes.
+const maxFontInstructions = 1 << 20
+
+// instructionBytes is the size of the fpgm, prep and cvt tables a font's own
+// table directory declares, read before the font is parsed.
+func instructionBytes(b []byte) int64 {
+	if len(b) < 12 {
+		return 0
+	}
+	var sum int64
+	n := int(binary.BigEndian.Uint16(b[4:]))
+	for i := 0; i < n && 12+16*(i+1) <= len(b); i++ {
+		rec := b[12+16*i:]
+		switch string(rec[:4]) {
+		case "fpgm", "prep", "cvt ":
+			sum += int64(binary.BigEndian.Uint32(rec[12:]))
+		}
+	}
+	return sum
+}
+
 // font loads the font a FontUri names, once per part.
 //
 // ⛔ A fragment on the URI is a face index inside a TrueType collection
@@ -102,6 +127,17 @@ func (c *converter) font(base, uri string) (*face, error) {
 	}
 	if bytes.HasPrefix(b, []byte("ttcf")) {
 		return nil, errUnsupportedFont
+	}
+	// ⛔ The subsetter copies the instruction tables whole, so a font of noise in
+	// them is held again as the subset, the deflated stream and the output: they
+	// are bounded, and what is left is charged at its copies.
+	ins := instructionBytes(b)
+	if ins > maxFontInstructions {
+		return nil, limit("bytes of font instructions", maxFontInstructions)
+	}
+	c.kept += outputFactor * ins
+	if err := c.fits(c.done, 0); err != nil {
+		return nil, err
 	}
 	ot, err := opentype.Parse(b)
 	var pf *pdfkit.Font

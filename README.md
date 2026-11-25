@@ -118,11 +118,16 @@ third review stacked them to 901 MiB on a 60 MB package). It is charged the
 font parts kept, each embedded image at what the PDF library stores (a JPEG as
 it is, at most 1024 declared pixels a byte, so a 36-byte stub declaring
 6000 x 6000 is refused; a PNG or TIFF at 3 bytes a pixel, 4 with alpha), the
-page content (`ContentLen`) and the output, which copies the last two, so
-images and content count twice. An image part nothing draws is not kept, and an
+page content (`ContentLen`) and the output, which copies the last two: the
+PDF library builds the whole file in a buffer that doubles, so images and
+content count FIVE times (a stopgap until it streams to the writer). A font's
+`fpgm`, `prep` and `cvt ` tables are copied whole into every subset, so they
+are capped at 1 MiB a font and charged four more times; the XML tree of a page
+is charged 128 bytes an element and 96 an attribute (plus their text) while it
+is built. An image part nothing draws is not kept, and an
 image drawn forty times is stored once. A PNG or TIFF has its decode memory
 estimated from the header BEFORE it is decoded (`MaxDecodeBytes`, 192 MiB: 24
-bytes a pixel for 8-bit colour, 40 for 16-bit, 16 more for a TIFF, whose
+bytes a pixel for 8-bit colour, 40 for 16-bit, 32 more for a TIFF, whose
 reader inflates a strip into a doubling buffer), charged for the decode only
 and released, and is charged its pixels once (`MaxDrawnPixels`); a JPEG is
 embedded as it is and never decoded here, progressive ones included; tile
@@ -138,7 +143,13 @@ them above **400 MiB** (`worstPeakMiB`), which is the bound the tests assert.
 That is a measurement on those inputs, not a proof: an element is measured
 after it is written, so it overshoots the content budget by what one element
 can write, the stored size of an image is the library's worst case and not read
-from it, and a part is read again when it is embedded.
+from it, and a part is read again when it is embedded. The fourth review's
+probes, at the defaults, peaked at 80 MiB (zero-padded JPEGs, refused), 164 to
+187 MiB (noise fonts, refused on instructions), 195 MiB (a 17,231 x 256 XML
+tree, refused) and 152 MiB for fonts, images and tree together (converted),
+where they had been 555, 709 to 761 and 489 MiB. The cost constants for the
+tree and the factor of five come from those probes. The effective content
+ceiling is now about 38 MiB, since content counts five times.
 
 ⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
 `ImageSource` with a scheme, a `..` that leaves the package, or a part that

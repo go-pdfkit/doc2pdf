@@ -357,7 +357,7 @@ func TestSecContentStreamBound(t *testing.T) {
 	var err error
 	t0 := time.Now()
 	heap := peakHeap(t, func() { _, err = lim0(t, b) })
-	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of page content") {
+	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of ") { // the content ceiling or, five copies of it, the memory budget
 		t.Fatalf("9.6 million segments at the default limits: %v", err)
 	}
 	t.Logf("content stream: %d byte package refused after %v, peak heap %d MiB", len(b), time.Since(t0).Round(time.Millisecond), heap)

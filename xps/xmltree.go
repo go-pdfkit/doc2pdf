@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 )
 
 // A node is one element of a part, with the namespace thrown away.
@@ -120,6 +121,23 @@ func checkAttrCounts(b []byte, max int) error {
 // encoding/xml expands no DTD entity, so there is no billion-laughs here; a
 // reference to one it does not know is a syntax error, which is what is wanted.
 func parseXML(b []byte, maxDepth, maxNodes, maxTokens int) (*node, error) {
+	return parseXMLWithin(b, maxDepth, maxNodes, maxTokens, 0)
+}
+
+// What the tree of a part costs in memory, measured on a page of 17,000
+// elements with 256 attributes each (489 MiB peak for 4.4 million attributes,
+// TestSecPeakXMLTree): a node and its slices, and a map entry with the strings
+// the decoder allocated for it.
+const (
+	nodeBytes = 128
+	attrBytes = 96
+)
+
+// parseXMLWithin is parseXML that also refuses a tree whose estimated size
+// (nodeBytes an element, attrBytes an attribute and the bytes of their names
+// and values) passes budget bytes; zero is no budget.
+func parseXMLWithin(b []byte, maxDepth, maxNodes, maxTokens int, budget int64) (*node, error) {
+	var cost int64
 	if err := checkAttrCounts(b, maxAttrs); err != nil {
 		return nil, err
 	}
@@ -150,6 +168,13 @@ func parseXML(b []byte, maxDepth, maxNodes, maxTokens int) (*node, error) {
 				return nil, limit("XML elements in one part", maxNodes)
 			}
 			n := &node{name: t.Name.Local}
+			cost += nodeBytes + int64(len(t.Name.Local)) + attrBytes*int64(len(t.Attr))
+			for _, a := range t.Attr {
+				cost += int64(len(a.Name.Local) + len(a.Value))
+			}
+			if budget > 0 && cost > budget {
+				return nil, limit("bytes of memory held", int(min(budget, math.MaxInt32)))
+			}
 			if len(t.Attr) > 0 {
 				n.attrs = make(map[string]string, len(t.Attr))
 				for _, a := range t.Attr {
