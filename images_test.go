@@ -289,7 +289,7 @@ func TestPictureFailuresAreReported(t *testing.T) {
 		func() {
 			defer func() { // a panic is a failure of this case, not of the test binary
 				if r := recover(); r != nil {
-					t.Errorf("%s: panic %v", name, r)
+					t.Errorf("%s: the run crashed, %v", name, r)
 				}
 			}()
 			code, _, errOut := drive(t, tc.args...)
