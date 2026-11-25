@@ -482,8 +482,9 @@ func TestSecEmbedRefusesBeforeWork(t *testing.T) {
 	// A part that cannot be read again is an error, and holds nothing.
 	c, r, im = mk(Limits{MaxMemory: 1 << 30}, "j.jpg")
 	im.part = "missing.jpg"
-	if _, err := r.embed(im); err == nil {
-		t.Error("a part that is gone was embedded")
+	// The error is the read's own, not the one an empty JPEG would give.
+	if _, err := r.embed(im); err == nil || errors.Is(err, ErrBadImage) {
+		t.Errorf("a part that is gone: %v", err)
 	}
 	if c.stored != 0 {
 		t.Errorf("stored %d after a failed read", c.stored)
