@@ -217,7 +217,8 @@ func TestPicturesAreBounded(t *testing.T) {
 		t.Errorf("exactly %d pictures: code %d, %q", maxImages, code, errOut)
 	}
 
-	const px = smallW * smallH
+	// a run is charged what is decoded: the coded size, padded to 68 x 46
+	const px = 68 * 46
 	defer func(a, b int64) { maxImagePixels, maxTotalPixels = a, b }(maxImagePixels, maxTotalPixels)
 	maxTotalPixels = 2 * px
 	if code, _, errOut := drive(t, many(2)...); code != 0 {
@@ -238,6 +239,30 @@ func TestPicturesAreBounded(t *testing.T) {
 	if code, _, errOut := drive(t, "-f", in, dst); code != 1 || !strings.Contains(errOut, "could not read") {
 		t.Errorf("a picture over the bound: code %d, %q", code, errOut)
 	}
+}
+
+// A grid of large tiles cropped to a sliver draws as a few pixels and decodes every tile:
+// the run is charged what is decoded, so a few such files cannot be had for free.
+func TestSliverGridIsChargedItsTiles(t *testing.T) {
+	// nine tiles of 4096 x 4096 under an output one pixel high: 151 million decoded pixels,
+	// more than the budget of a run, for 36865 pixels of output
+	in := write(t, "sliver.heic", mustRead(t, filepath.Join("testdata", "sliver-grid.heic")))
+	dst := filepath.Join(t.TempDir(), "s.pdf")
+	if code, _, errOut := drive(t, "-f", in, dst); code != 1 || !strings.Contains(errOut, "pixels together") {
+		t.Errorf("a sliver of nine large tiles: code %d, %q", code, errOut)
+	}
+	if _, err := os.Stat(dst); err == nil {
+		t.Error("a refused run left a PDF")
+	}
+}
+
+func mustRead(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func TestPictureFailuresAreReported(t *testing.T) {

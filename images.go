@@ -37,7 +37,12 @@ const (
 // Variables only so that a test can lower them to the size of its pictures.
 var (
 	maxImagePixels = int64(1 << 26) // pixels of one picture (67 million: 8192 x 8192)
-	maxTotalPixels = int64(1 << 28)
+	// Pixels DECODED in one run, not pixels drawn: a grid of large tiles cropped to a sliver
+	// is cheap to draw and costs all its tiles to decode. The PDF is built in memory (pdfkit
+	// has no streaming writer: its Write numbers every object before the first byte goes
+	// out) and held twice, in the document and in the buffer written to disk, at most three
+	// bytes a pixel when the pictures do not compress: 2^27 pixels bound it near 800 MiB.
+	maxTotalPixels = int64(1 << 27)
 )
 
 // writeDocument serialises the document; a variable so a test can make it fail, which
@@ -109,8 +114,8 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 		// The size is read before the pixels are, so that a picture that would take the
 		// PDF over its budget is refused without being decoded. A picture whose size cannot
 		// be read has none here, and the decode below refuses it in the same words.
-		cfg, _ := heif.DecodeConfigOptions(bytes.NewReader(src), heif.Options{Limits: lim})
-		if total += int64(cfg.Width) * int64(cfg.Height); total > maxTotalPixels {
+		work, _ := heif.DecodeWork(bytes.NewReader(src), heif.Options{Limits: lim})
+		if total += work; total > maxTotalPixels {
 			fmt.Fprintf(errOut, "doc2pdf: the pictures hold more than %d pixels together; %s is over it\n", maxTotalPixels, in)
 			return 1
 		}
