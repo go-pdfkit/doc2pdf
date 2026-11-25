@@ -229,12 +229,20 @@ func TestPicturesAreBounded(t *testing.T) {
 func TestPictureFailuresAreReported(t *testing.T) {
 	good := heic(t, "small.heic")
 	bad := write(t, "bad.heic", []byte("this is not a picture"))
+	// the boxes that describe the picture are whole and its coded data is cut: the size
+	// can be read, the pixels cannot
+	whole, err := os.ReadFile(filepath.Join("testdata", "small.heic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut := write(t, "cut.heic", whole[:len(whole)-200])
 	dir := t.TempDir()
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
 		"not a HEIF":      {[]string{bad, filepath.Join(dir, "a.pdf")}, "go-images/heif could not read"},
+		"cut picture":     {[]string{cut, filepath.Join(dir, "e.pdf")}, "go-images/heif could not read"},
 		"missing file":    {[]string{filepath.Join(dir, "none.heic"), filepath.Join(dir, "b.pdf")}, "no such file"},
 		"over max-input":  {[]string{"--max-input", "10", good, filepath.Join(dir, "c.pdf")}, "-max-input raises it"},
 		"no output place": {[]string{good, filepath.Join(dir, "no", "such", "d.pdf")}, "doc2pdf:"},

@@ -107,12 +107,9 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 			return 1
 		}
 		// The size is read before the pixels are, so that a picture that would take the
-		// PDF over its budget is refused without being decoded.
-		cfg, err := heif.DecodeConfigOptions(bytes.NewReader(src), heif.Options{Limits: lim})
-		if err != nil {
-			fmt.Fprintf(errOut, "doc2pdf: %s could not read %s: %v\n", imageFormat.From, in, err)
-			return 1
-		}
+		// PDF over its budget is refused without being decoded. A picture whose size cannot
+		// be read has none here, and the decode below refuses it in the same words.
+		cfg, _ := heif.DecodeConfigOptions(bytes.NewReader(src), heif.Options{Limits: lim})
 		if total += int64(cfg.Width) * int64(cfg.Height); total > maxTotalPixels {
 			fmt.Fprintf(errOut, "doc2pdf: the pictures hold more than %d pixels together; %s is over it\n", maxTotalPixels, in)
 			return 1
