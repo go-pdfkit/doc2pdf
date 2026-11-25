@@ -444,3 +444,48 @@ func TestSecImageInfoKeepsNoBytes(t *testing.T) {
 		t.Errorf("a paletted opaque PNG is stored at %d bytes, want %d", im.stored, 100*100*3)
 	}
 }
+
+// embed refuses before it reads, and before it decodes: each of its three
+// early exits is hit directly, with nothing drawn, stored or read after it.
+func TestSecEmbedRefusesBeforeWork(t *testing.T) {
+	p := newPkg(page(``))
+	p.extra["i.png"] = noisePalettedPNG(t, 100, 4)
+	p.extra["j.jpg"] = stub1x1JPEG
+	b := p.bytes(t)
+	mk := func(lim Limits, name string) (*converter, *renderer, *imageInfo) {
+		c := newConv(t, b, Limits{})
+		im, err := c.image(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.lim.MaxMemory = lim.MaxMemory
+		c.read = 0
+		return c, &renderer{c: c, p: c.doc.AddPage(pdfkit.NewPageSize(100, 100))}, im
+	}
+	// The stored size does not fit: nothing is read.
+	c, r, im := mk(Limits{MaxMemory: 1}, "j.jpg")
+	if _, err := r.embed(im); !errors.Is(err, ErrLimit) {
+		t.Errorf("a JPEG over the budget: %v", err)
+	}
+	if c.read != 0 || c.stored != 0 {
+		t.Errorf("read %d, stored %d after a refusal", c.read, c.stored)
+	}
+	// The stored size fits and the decode on top of it does not: nothing is drawn.
+	_, _, im0 := mk(Limits{MaxMemory: 1 << 30}, "i.png")
+	c, r, im = mk(Limits{MaxMemory: 2*im0.stored + 1}, "i.png")
+	if _, err := r.embed(im); !errors.Is(err, ErrLimit) {
+		t.Errorf("a PNG whose decode does not fit: %v", err)
+	}
+	if c.drawn != 0 || c.stored != 0 {
+		t.Errorf("drawn %d, stored %d after a refusal", c.drawn, c.stored)
+	}
+	// A part that cannot be read again is an error, and holds nothing.
+	c, r, im = mk(Limits{MaxMemory: 1 << 30}, "j.jpg")
+	im.part = "missing.jpg"
+	if _, err := r.embed(im); err == nil {
+		t.Error("a part that is gone was embedded")
+	}
+	if c.stored != 0 {
+		t.Errorf("stored %d after a failed read", c.stored)
+	}
+}
