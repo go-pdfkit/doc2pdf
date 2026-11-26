@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -127,19 +128,20 @@ var formats = []format{
 }
 
 // A direct reader draws the PDF itself, for a format with no richdoc form. It
-// returns the PDF and what the file used that was not drawn.
-type direct func(src []byte) (pdf []byte, notDrawn []string, err error)
+// returns what writes the PDF to a writer, as it goes, and what the file used
+// that was not drawn. Everything that can refuse has done so by then.
+type direct func(src []byte) (write func(io.Writer) (int64, error), notDrawn []string, err error)
 
 // directReaders are the formats whose Read is nil, by Name.
 var directReaders = map[string]direct{
-	"XPS": func(src []byte) ([]byte, []string, error) {
+	"XPS": func(src []byte) (func(io.Writer) (int64, error), []string, error) {
 		// The package limit is the one this command accepted (-max-input may
 		// have raised it), never less than xps's default.
-		res, err := xps.Convert(src, xps.Limits{MaxPackageBytes: max(int64(len(src)), xpsDefaultMaxInput)})
+		d, err := xps.Prepare(src, xps.Limits{MaxPackageBytes: max(int64(len(src)), xpsDefaultMaxInput)})
 		if err != nil {
 			return nil, nil, err
 		}
-		return res.PDF, res.Skipped, nil
+		return d.WriteTo, d.Skipped, nil
 	},
 }
 

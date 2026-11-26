@@ -424,7 +424,7 @@ func TestSecEmbeddedImagesAreBudgeted(t *testing.T) {
 		fmt.Fprintf(&body, secImgPath, "/"+name)
 	}
 	p.pages = []string{page(body.String())}
-	p.extra["pad.bin"] = secJunk(total / 250)
+	p.extra["pad.bin"] = secJunk(total / 100) // a part is read twice (here and at the embed): the ratio must leave room
 	b := p.bytes(t)
 	_, err, heap, took := secRun(t, b)
 	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "bytes of memory held") {

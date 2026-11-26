@@ -135,7 +135,7 @@ func (c *converter) font(base, uri string) (*face, error) {
 	if ins > maxFontInstructions {
 		return nil, limit("bytes of font instructions", maxFontInstructions)
 	}
-	c.kept += outputFactor * ins
+	c.kept += fontCopies * ins
 	if err := c.fits(c.done, 0); err != nil {
 		return nil, err
 	}

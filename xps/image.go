@@ -295,8 +295,12 @@ func (r *renderer) embed(im *imageInfo) (*pdfkit.Image, error) {
 	// ⛔ The memory budget: this image's part is read now and held while it is
 	// embedded, a PNG or TIFF is decoded on top of that, and what the document
 	// stores for it is held to the end (and copied into the output).
-	if err := r.fits((1 + outputFactor) * im.stored); err != nil {
-		return nil, err
+	// A JPEG is read and then copied into the document: the part and the stored
+	// copy, both at once. A PNG or TIFF is checked below, with its decode.
+	if im.kind == "jpeg" {
+		if err := r.fits(2 * im.stored); err != nil {
+			return nil, err
+		}
 	}
 	b, err := r.c.part(im.part)
 	if err != nil {
@@ -311,7 +315,7 @@ func (r *renderer) embed(im *imageInfo) (*pdfkit.Image, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrBadImage, err)
 		}
-		r.c.stored += im.stored
+		r.c.stored += h.StoredLen()
 		return h, nil
 	}
 	// ⛔ Everything that bounds a decode is checked HERE, from the header, before
@@ -320,7 +324,7 @@ func (r *renderer) embed(im *imageInfo) (*pdfkit.Image, error) {
 		return nil, limit("estimated bytes to decode one image", int(min(r.c.lim.MaxDecodeBytes, math.MaxInt32)))
 	}
 	// The part, the decode and the stored copy, all at once.
-	if err := r.fits(int64(len(b)) + im.cost + (1+outputFactor)*im.stored); err != nil {
+	if err := r.fits(int64(len(b)) + im.cost + im.stored); err != nil {
 		return nil, err
 	}
 	r.c.drawn += int64(im.w) * int64(im.h)
@@ -339,8 +343,9 @@ func (r *renderer) embed(im *imageInfo) (*pdfkit.Image, error) {
 	}
 	// The decoded image and the part are not kept: the handle holds the
 	// compressed samples, charged at their worst.
-	r.c.stored += im.stored
-	return r.c.doc.AddImage(img), nil
+	h := r.c.doc.AddImage(img)
+	r.c.stored += h.StoredLen()
+	return h, nil
 }
 
 // clipRect clips to an axis-aligned rectangle.

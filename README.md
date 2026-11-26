@@ -113,16 +113,18 @@ content stream is an in-memory buffer, so it is budgeted in bytes,
 element, since a dash array of 126 long numbers is as many bytes as a hundred
 segments); a dashed-path bomb is refused at 244 MiB, a tile bomb at 153 MiB,
 seven 32 MiB JPEG parts at 140 MiB. All of the memory a conversion holds is
-ONE budget, `MaxMemory` (192 MiB), because separate ceilings added up (the
+ONE budget, `MaxMemory` (160 MiB), because separate ceilings added up (the
 third review stacked them to 901 MiB on a 60 MB package). It is charged the
-font parts kept, each embedded image at what the PDF library stores (a JPEG as
-it is, at most 1024 declared pixels a byte, so a 36-byte stub declaring
-6000 x 6000 is refused; a PNG or TIFF at 3 bytes a pixel, 4 with alpha), the
-page content (`ContentLen`) and the output, which copies the last two: the
-PDF library builds the whole file in a buffer that doubles, so images and
-content count FIVE times (a stopgap until it streams to the writer). A font's
-`fpgm`, `prep` and `cvt ` tables are copied whole into every subset, so they
-are capped at 1 MiB a font and charged four more times; the XML tree of a page
+font parts kept, each embedded image at the size the PDF library reports for
+it once embedded (`StoredLen`; before that, a JPEG at its length, and a PNG or
+TIFF at an estimate of 3 bytes a pixel, 4 with alpha, 1024 declared pixels a
+byte at most, so a 36-byte stub declaring 6000 x 6000 is refused), and the
+page content (`ContentLen`). The PDF is NOT held again: `doc2pdf` writes it
+straight into the temporary file (`xps.Prepare` then `Doc.WriteTo`), and
+only the bytes API, `xps.Convert`, which returns a buffer, is charged one more
+copy. A JPEG is read and then copied, so both count while it is embedded. A
+font's `fpgm`, `prep` and `cvt ` tables are copied whole into every subset, so
+they are capped at 1 MiB a font and charged four more times; the XML tree of a page
 is charged 128 bytes an element and 96 an attribute (plus their text) while it
 is built. An image part nothing draws is not kept, and an
 image drawn forty times is stored once. A PNG or TIFF has its decode memory
@@ -142,14 +144,14 @@ duplicates refused) at 19 MiB. **No probe of the three security reviews exceeded
 them above **400 MiB** (`worstPeakMiB`), which is the bound the tests assert.
 That is a measurement on those inputs, not a proof: an element is measured
 after it is written, so it overshoots the content budget by what one element
-can write, the stored size of an image is the library's worst case and not read
-from it, and a part is read again when it is embedded. The fourth review's
-probes, at the defaults, peaked at 80 MiB (zero-padded JPEGs, refused), 164 to
-187 MiB (noise fonts, refused on instructions), 195 MiB (a 17,231 x 256 XML
-tree, refused) and 152 MiB for fonts, images and tree together (converted),
-where they had been 555, 709 to 761 and 489 MiB. The cost constants for the
-tree and the factor of five come from those probes. The effective content
-ceiling is now about 38 MiB, since content counts five times.
+can write, a raster image is checked before it is embedded on an estimate (the
+charge after it is the real size), and a part is read again when it is
+embedded, so it counts twice against the ratio budget. The fourth review's
+probes, at the defaults, peaked at 160 MiB (zero-padded JPEGs, refused),
+164 to 187 MiB (noise fonts, refused on instructions), 187 MiB (a 17,231 x 256
+XML tree, refused) and 111 MiB for fonts, images and tree together
+(converted), where they had been 555, 709 to 761 and 489 MiB; seven 32 MiB JPEG
+parts peak at 247 MiB. The cost constants for the tree come from those probes.
 
 ⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
 `ImageSource` with a scheme, a `..` that leaves the package, or a part that

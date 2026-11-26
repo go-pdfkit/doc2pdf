@@ -148,13 +148,32 @@ func TestSecFontInstructionsAreChargedAtTheirCopies(t *testing.T) {
 	const extra = 512 << 10
 	n0 := minMemory(t, fontsPackage(t, 1, 1<<10))
 	n1 := minMemory(t, fontsPackage(t, 1, 1<<10+extra))
-	if n1-n0 != (1+outputFactor)*extra {
-		t.Errorf("%d more bytes of instructions cost %d, want %d", extra, n1-n0, (1+outputFactor)*extra)
+	if n1-n0 != (1+fontCopies)*extra {
+		t.Errorf("%d more bytes of instructions cost %d, want %d", extra, n1-n0, (1+fontCopies)*extra)
 	}
 }
 
-// A JPEG is stored once and written out outputFactor more times: d more bytes
-// of it move the smallest budget that converts by (1+outputFactor) d.
+// minPrepare is the smallest MaxMemory at which b is drawn (Prepare), by
+// bisection.
+func minPrepare(t *testing.T, b []byte) int64 {
+	t.Helper()
+	lo, hi := int64(1), int64(192<<20)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if _, err := Prepare(b, Limits{MaxMemory: mid}); err == nil {
+			hi = mid
+		} else if errors.Is(err, ErrLimit) {
+			lo = mid + 1
+		} else {
+			t.Fatalf("MaxMemory %d: %v", mid, err)
+		}
+	}
+	return lo
+}
+
+// A JPEG is stored once, at the size the library reports for it, and the PDF is
+// streamed: d more bytes of it move the smallest budget that draws it by d, and
+// the one that returns the bytes (Convert holds a buffer of them too) by 2 d.
 func TestSecStoredBytesAreChargedAtTheirCopies(t *testing.T) {
 	mk := func(pad int) []byte {
 		p := newPkg(page(fmt.Sprintf(secImgPath, "/j.jpg")))
@@ -162,9 +181,14 @@ func TestSecStoredBytesAreChargedAtTheirCopies(t *testing.T) {
 		return p.bytes(t)
 	}
 	const d = 1 << 20
-	n0, n1 := minMemory(t, mk(1<<10)), minMemory(t, mk(1<<10+d))
-	if n1-n0 != (1+outputFactor)*d {
-		t.Errorf("%d more bytes of JPEG cost %d, want %d", d, n1-n0, (1+outputFactor)*d)
+	// Big enough that the image, not the page around it, decides the budget.
+	const base = 4 << 20
+	if n0, n1 := minPrepare(t, mk(base)), minPrepare(t, mk(base+d)); n1-n0 != 2*d {
+		// The part just read and its stored copy are alive together at embed.
+		t.Errorf("%d more bytes of JPEG cost %d to draw, want %d", d, n1-n0, 2*d)
+	}
+	if n0, n1 := minMemory(t, mk(base)), minMemory(t, mk(base+d)); n1-n0 != 2*d {
+		t.Errorf("%d more bytes of JPEG cost %d to convert, want %d", d, n1-n0, 2*d)
 	}
 }
 
@@ -307,4 +331,87 @@ func TestSecPeakAliasedParts(t *testing.T) {
 			peak3(t, tc.name, zipOf(t, parts))
 		})
 	}
+}
+
+// Prepare draws and WriteTo streams: the bytes are the ones Convert returns,
+// counted, and the document can be written again.
+func TestPrepareWriteToMatchesConvert(t *testing.T) {
+	b := newPkg(page(`<Path Data="M 10,10 L 90,10 90,60 Z" Fill="#FFFF0000"/>`)).bytes(t)
+	res, err := Convert(b, Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := Prepare(b, Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Pages != res.Pages || d.Pages != 1 {
+		t.Errorf("pages: %d, %d", d.Pages, res.Pages)
+	}
+	for i := 0; i < 2; i++ {
+		var out bytes.Buffer
+		n, err := d.WriteTo(&out)
+		if err != nil || n != int64(out.Len()) || n != int64(len(res.PDF)) {
+			t.Fatalf("write %d: n=%d len=%d want %d err=%v", i, n, out.Len(), len(res.PDF), err)
+		}
+	}
+}
+
+// A writer that fails ends the write with its error, and says how far it got.
+func TestWriteToReportsItsWriter(t *testing.T) {
+	d, err := Prepare(newPkg(page(`<Path Data="M 10,10 L 90,10 90,60 Z" Fill="#FFFF0000"/>`)).bytes(t), Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("disk full")
+	n, err := d.WriteTo(&failAfter{n: 100, err: boom})
+	if !errors.Is(err, boom) || n != 100 {
+		t.Errorf("n=%d err=%v", n, err)
+	}
+}
+
+type failAfter struct {
+	n   int
+	err error
+}
+
+func (f *failAfter) Write(p []byte) (int, error) {
+	if len(p) > f.n {
+		n := f.n
+		f.n = 0
+		return n, f.err
+	}
+	f.n -= len(p)
+	return len(p), nil
+}
+
+// An image is charged what the library says it stores, not the bound it is
+// admitted by: a flat PNG deflates to a few bytes, far under 3 a pixel.
+func TestImageIsChargedAtItsStoredLength(t *testing.T) {
+	var enc bytes.Buffer
+	if err := png.Encode(&enc, image.NewNRGBA(image.Rect(0, 0, 256, 256))); err != nil {
+		t.Fatal(err)
+	}
+	p := newPkg(page(fmt.Sprintf(secImgPath, "/i.png")))
+	p.extra["i.png"] = enc.Bytes()
+	d, err := Prepare(p.bytes(t), Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.c.stored <= 0 || d.c.stored >= 3*256*256/10 {
+		t.Errorf("a flat 256x256 PNG is charged %d bytes", d.c.stored)
+	}
+}
+
+// Convert holds the bytes it returns beside the document: it needs the room for
+// them, which Prepare, streaming, does not.
+func TestConvertChargesItsBuffer(t *testing.T) {
+	p := newPkg(page(fmt.Sprintf(secImgPath, "/j.jpg")))
+	p.extra["j.jpg"] = append(append([]byte(nil), stub1x1JPEG...), noise(4<<20, 3)...)
+	b := p.bytes(t)
+	n := minPrepare(t, b)
+	if _, err := Prepare(b, Limits{MaxMemory: n}); err != nil {
+		t.Fatalf("Prepare at its minimum: %v", err)
+	}
+	refuses(t, "convert beside prepare", b, Limits{MaxMemory: n}, ErrLimit)
 }

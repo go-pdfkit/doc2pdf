@@ -52,6 +52,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
 	"path"
@@ -146,15 +147,15 @@ type Limits struct {
 	MaxContentBytes int64
 	// MaxMemory is the one memory budget of a conversion, in bytes. It is
 	// charged for what the conversion holds: the font parts kept, each image the
-	// PDF library stores (the JPEG as it is; a PNG or TIFF at its worst, three
-	// bytes a pixel, four with an alpha channel, however well it deflates), the
-	// page content as the library counts it, and the output, which the library
-	// builds in a buffer that doubles and this package copies (so images and
-	// content count five times), and for a font its instruction tables
-	// (fpgm, prep, cvt: 1 MiB at most) four times more. While an image is
-	// decoded it is also charged for the part and the decode estimate, and that
-	// is released after. Default 192 MiB, which keeps the peak heap under
-	// 400 MiB (see the README).
+	// PDF library stores (its real size, which the library reports as the image
+	// is registered), the page content as the library counts it, and for a font
+	// its instruction tables (fpgm, prep, cvt: 1 MiB at most) four times more.
+	// The PDF is written object by object (WriteTo), so the output is not held
+	// again; Convert, which returns it as bytes, is charged one more copy of the
+	// images and content. While an image is decoded it is also charged for the
+	// part, the decode estimate and its stored bound, and that is released
+	// after. Default 160 MiB, which keeps the peak heap under 400 MiB (see the
+	// README).
 	MaxMemory int64
 	// MaxDecodeBytes is the most memory one image decode may be estimated to
 	// need (pixels times a per-pixel cost by format and depth), checked from the
@@ -195,7 +196,7 @@ func (l Limits) withDefaults() Limits {
 	def64(&l.MaxPartBytes, 32<<20)
 	def64(&l.MaxUncompressedBytes, 256<<20)
 	def64(&l.MaxContentBytes, 48<<20)
-	def64(&l.MaxMemory, 192<<20)
+	def64(&l.MaxMemory, 160<<20)
 	def64(&l.MaxDecodeBytes, 192<<20)
 	def(&l.MaxParts, 8192)
 	def(&l.MaxRatio, 250)
@@ -237,8 +238,29 @@ const (
 // compressOutput is on; a test turns it off to read the content streams.
 var compressOutput = true
 
-// Convert turns the bytes of an XPS or OpenXPS file into a PDF.
+// Convert turns the bytes of an XPS or OpenXPS file into a PDF held in memory.
+// The buffer is sized to the images and content the budget has charged, so it
+// is held once more beside the document; Prepare and WriteTo stream instead.
 func Convert(b []byte, lim Limits) (*Result, error) {
+	d, err := Prepare(b, lim)
+	if err != nil {
+		return nil, err
+	}
+	// The buffer is one more copy of what the document stores.
+	if err := d.c.fits(d.c.done, d.c.stored+d.c.done+64<<10); err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	out.Grow(int(min(d.c.stored+d.c.done+64<<10, d.c.lim.MaxMemory)))
+	if _, err := d.WriteTo(&out); err != nil {
+		return nil, err
+	}
+	return &Result{PDF: out.Bytes(), Pages: d.Pages, Skipped: d.Skipped}, nil
+}
+
+// Prepare draws an XPS or OpenXPS file and checks every limit, without writing
+// the PDF: WriteTo does, straight to a writer.
+func Prepare(b []byte, lim Limits) (*Doc, error) {
 	lim = lim.withDefaults()
 	pkg, err := opc.Open(b, opc.Limits{
 		MaxPackageBytes:      lim.MaxPackageBytes,
@@ -290,21 +312,18 @@ type converter struct {
 	kept, stored int64
 }
 
-// outputFactor is how many more times the PDF is held while it is written than
-// the images and content the document stores. pdfkit v0.26.0 builds the whole
-// file in a bytes.Buffer it does not size (document.go, Write), so the buffer
-// doubles as it grows (up to twice its final size, with the old one still
-// uncollected) and this package copies it once more into the result: four
-// copies on top of the one the document holds (555 MiB measured for 96 MiB of
-// JPEG parts, TestSecPeakJPEGDoubling). It goes when pdfkit writes to its
-// writer as it goes and the output is streamed.
-const outputFactor = 4
+// fontCopies is how many more times a font's instruction tables are held than
+// its part: opentype copies fpgm, prep and cvt whole into every subset, and the
+// subset is deflated and emitted (709 to 761 MiB measured for four to six noise
+// fonts before they were charged).
+const fontCopies = 4
 
 // held is what the conversion holds for good, given the content bytes of the
-// pages so far: the kept parts, and the stored images and the content, once
-// for the document and outputFactor times for the output.
+// pages so far: the kept parts, and the stored images and the content. Since
+// pdfkit v0.27.0 writes the file object by object, the output is not held a
+// second time: Write streams to the writer.
 func (c *converter) held(content int64) int64 {
-	return c.kept + (1+outputFactor)*(c.stored+content)
+	return c.kept + c.stored + content
 }
 
 // fits refuses the conversion when what it holds, plus a transient charge, is
@@ -504,7 +523,39 @@ func (c *converter) pageList() ([]string, error) {
 	return pages, nil
 }
 
-func (c *converter) run() (*Result, error) {
+// Doc is a drawn document, ready to be written: every page has been laid out
+// and every limit checked, so WriteTo can only fail on its writer.
+type Doc struct {
+	// Pages is how many pages it has.
+	Pages int
+	// Skipped says what the file used that was not drawn, as in Result.
+	Skipped []string
+
+	c *converter
+}
+
+// WriteTo writes the PDF to w, object by object: nothing but the document
+// itself is held, however large the file. It may be called more than once.
+func (d *Doc) WriteTo(w io.Writer) (int64, error) {
+	cw := &countWriter{w: w}
+	if err := d.c.doc.Write(cw); err != nil {
+		return cw.n, fmt.Errorf("xps: writing the PDF: %w", err)
+	}
+	return cw.n, nil
+}
+
+type countWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
+}
+
+func (c *converter) run() (*Doc, error) {
 	pages, err := c.pageList()
 	if err != nil {
 		return nil, err
@@ -514,18 +565,10 @@ func (c *converter) run() (*Result, error) {
 			return nil, err
 		}
 	}
-	// The output is as large as the images and the content, which the budget has
-	// charged: a buffer of that size is not grown, and so not doubled.
-	var out bytes.Buffer
-	out.Grow(int(min(c.stored+c.done+64<<10, c.lim.MaxMemory)))
-	err = c.doc.Write(&out)
-	if err == nil {
-		res := &Result{PDF: out.Bytes(), Pages: c.pages}
-		for what, n := range c.skip {
-			res.Skipped = append(res.Skipped, fmt.Sprintf("%s (%d)", what, n))
-		}
-		sort.Strings(res.Skipped)
-		return res, nil
+	d := &Doc{Pages: c.pages, c: c}
+	for what, n := range c.skip {
+		d.Skipped = append(d.Skipped, fmt.Sprintf("%s (%d)", what, n))
 	}
-	return nil, fmt.Errorf("xps: writing the PDF: %w", err)
+	sort.Strings(d.Skipped)
+	return d, nil
 }

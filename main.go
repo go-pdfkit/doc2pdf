@@ -146,9 +146,10 @@ func run(out, errOut interface {
 		refused  []string
 		notDrawn []string
 		pdf      []byte
+		write    func(io.Writer) (int64, error)
 	)
 	if d, ok := directReaders[f.Name]; ok {
-		pdf, notDrawn, err = d(src)
+		write, notDrawn, err = d(src)
 		if err != nil {
 			fmt.Fprintf(errOut, "doc2pdf: %s could not read this %s: %v\n", f.From, f.Name, err)
 			return 1
@@ -173,7 +174,15 @@ func run(out, errOut interface {
 	}
 
 	dst := outputName(in, args)
-	if err := writeAtomic(dst, pdf, o.force); err != nil {
+	// A direct reader streams into the temporary file; the others hand over the
+	// bytes they built.
+	size := int64(len(pdf))
+	if write != nil {
+		size, err = writeAtomicStream(dst, write, o.force)
+	} else {
+		err = writeAtomic(dst, pdf, o.force)
+	}
+	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(errOut, "doc2pdf: %s is already there; -f overwrites it\n", dst)
 		} else {
@@ -183,7 +192,7 @@ func run(out, errOut interface {
 	}
 
 	fmt.Fprintf(out, "%s → %s (%s, read by %s, %d bytes)\n",
-		in, dst, f.Name, f.From, len(pdf))
+		in, dst, f.Name, f.From, size)
 	// ⛔ Said on the OUTPUT, not buried in a log. A document that asked for
 	// pictures it did not get is a page with holes in it, and the person who
 	// converted it is the only one who can decide whether that matters.
