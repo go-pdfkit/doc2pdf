@@ -61,10 +61,9 @@ func woffTables(b []byte) (tabs []woffTable, ok bool) {
 			idx := flags & 0x3f
 			tag := woff2Tags[idx]
 			if idx == 0x3f {
-				if i+4 > len(b) {
-					return nil, false
-				}
-				tag = string(b[i : i+4])
+				// A tag cut short names nothing, and the length after it is
+				// what is missing: readBase128 refuses it.
+				tag = string(b[i:min(i+4, len(b))])
 				i += 4
 			}
 			orig, next, ok := readBase128(b, i)
