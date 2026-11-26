@@ -139,20 +139,14 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 	// stored pictures is held. fill runs again if the file system has no hard links, so
 	// the count starts over each time.
 	var size int64
-	var docErr error
 	err := writeAtomicWith(dst, func(f *os.File) error {
 		cw := &countWriter{w: bufio.NewWriter(f)}
-		docErr = writeDocument(doc, cw)
-		if docErr == nil {
-			docErr = cw.w.Flush()
+		if err := writeDocument(doc, cw); err != nil {
+			return err
 		}
 		size = cw.n
-		return docErr
+		return cw.w.Flush()
 	}, o.force)
-	if docErr != nil {
-		fmt.Fprintf(errOut, "doc2pdf: %v\n", docErr)
-		return 1
-	}
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(errOut, "doc2pdf: %s is already there; -f overwrites it\n", dst)
