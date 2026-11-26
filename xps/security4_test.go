@@ -253,7 +253,7 @@ func TestSecImageDecodeIsChargedBeforeItRuns(t *testing.T) {
 // budget is exact, and no budget is no limit.
 func TestSecXMLTreeBudgetBoundary(t *testing.T) {
 	in := []byte(`<a b="xy"/>`)
-	const cost = nodeBytes + 1 + attrBytes + 1 + 2
+	cost := elementCost(1) + 1 + 1 + 2
 	if _, err := parseXMLWithin(in, 4, 10, 100, cost); err != nil {
 		t.Errorf("a tree of %d bytes under a budget of %d: %v", cost, cost, err)
 	}

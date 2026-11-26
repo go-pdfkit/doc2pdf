@@ -21,6 +21,11 @@ import (
 	"github.com/go-pdfkit/pdfkit"
 )
 
+// errWOFF is a WOFF or WOFF2 font part, which ECMA-388 §9.1.7 does not allow
+// (OpenType, with TrueType or CFF outlines, is the font format). The run that
+// names it is skipped and counted, like any unreadable font.
+var errWOFF = errors.New("a WOFF font is not an XPS font part (ECMA-388 §9.1.7)")
+
 // errUnsupportedFont is a font that is recognised and not used: a TrueType
 // collection, which go-opentype does not read. The run is counted, not failed.
 var errUnsupportedFont = errors.New("xps: unsupported font format")
@@ -68,15 +73,6 @@ const maxFontInstructions = 1 << 20
 // instructionBytes is the size of the fpgm, prep and cvt tables a font's own
 // table directory declares, read before the font is parsed.
 func instructionBytes(b []byte) int64 {
-	if tabs, ok := woffTables(b); ok {
-		var sum int64
-		for _, t := range tabs {
-			if t.instr {
-				sum += t.orig
-			}
-		}
-		return sum
-	}
 	if len(b) < 12 {
 		return 0
 	}
@@ -90,6 +86,11 @@ func instructionBytes(b []byte) int64 {
 		}
 	}
 	return sum
+}
+
+// isWOFF is whether b opens with a WOFF ("wOFF") or WOFF2 ("wOF2") signature.
+func isWOFF(b []byte) bool {
+	return bytes.HasPrefix(b, []byte("wOFF")) || bytes.HasPrefix(b, []byte("wOF2"))
 }
 
 // font loads the font a FontUri names, once per part.
@@ -134,6 +135,16 @@ func (c *converter) font(base, uri string) (*face, error) {
 	if ct := c.pkg.ContentType(name); ct == ctObfuscatedFont || strings.HasSuffix(strings.ToLower(name), ".odttf") {
 		b, _ = deobfuscate(name, b)
 	}
+	// ⛔ ECMA-388 §9.1.7 (Font Parts): "OpenXPS Documents MUST support the
+	// OpenType font format (ISO/IEC 14496-22:2007), including TrueType and CFF
+	// fonts"; the font content types are application/vnd.ms-opentype and its
+	// obfuscated form (Annex D). A WOFF or WOFF2 file is neither: it is a
+	// compressed wrapper that opentype.Parse inflates (256 MiB at most) into an
+	// sfnt held beside its stream, so it is refused by its signature, before
+	// the parser sees it, instead of being accounted for.
+	if isWOFF(b) {
+		return nil, fmt.Errorf("%w: %w: %s", ErrBadFont, errWOFF, name)
+	}
 	if bytes.HasPrefix(b, []byte("ttcf")) {
 		return nil, errUnsupportedFont
 	}
@@ -145,18 +156,12 @@ func (c *converter) font(base, uri string) (*face, error) {
 		return nil, limit("bytes of font instructions", maxFontInstructions)
 	}
 	c.kept += fontCopies * ins
-	// ⛔ A WOFF or WOFF2 is inflated by the parser into an sfnt that is held for
-	// the whole conversion, and while it is inflated the stream it comes from is
-	// held beside it: the decoded size, from the directory, is charged before
-	// anything is inflated.
-	dec := decodedBytes(b)
-	c.kept += dec
-	if err := c.fits(c.done, dec); err != nil {
+	if err := c.fits(c.done, 0); err != nil {
 		return nil, err
 	}
 	// What a subset of this font can copy besides its instruction tables is held
 	// again in the buffer Convert returns the PDF in (see Convert).
-	c.glyphBytes += max(int64(len(b)), dec) - ins
+	c.glyphBytes += int64(len(b)) - ins
 	ot, err := opentype.Parse(b)
 	var pf *pdfkit.Font
 	if err == nil {
@@ -301,6 +306,10 @@ func (r *renderer) glyphs(n *node, cx ctx) error {
 	f, err := r.c.font(r.part, n.attr("FontUri"))
 	if errors.Is(err, errUnsupportedFont) {
 		r.c.note("TrueType collection font")
+		return nil
+	}
+	if errors.Is(err, errWOFF) {
+		r.c.note("WOFF font (not an XPS font part, ECMA-388 §9.1.7)")
 		return nil
 	}
 	if err != nil {

@@ -128,10 +128,28 @@ func parseXML(b []byte, maxDepth, maxNodes, maxTokens int) (*node, error) {
 // elements with 256 attributes each (489 MiB peak for 4.4 million attributes,
 // TestSecPeakXMLTree): a node and its slices, and a map entry with the strings
 // the decoder allocated for it.
+//
+// An element with any attribute also holds a map, whose first bucket is
+// allocated whole: measured 56 B for an element with none, 386 B with one, 353 B
+// with eight (one bucket), 674 B with nine, 4.7 KiB with 64
+// (TestSecXMLTreeCostIsMeasured). Charged per element that has attributes:
+// attrMapBytes for that bucket, plus attrBytes for each one. One attribute is
+// then 624 B against the 528 B peak a part of 240,000 such elements reached.
 const (
-	nodeBytes = 128
-	attrBytes = 96
+	nodeBytes    = 128
+	attrBytes    = 96
+	attrMapBytes = 400
 )
+
+// elementCost is what one element of the tree is charged, without the bytes of
+// its strings.
+func elementCost(attrs int) int64 {
+	c := int64(nodeBytes) + attrBytes*int64(attrs)
+	if attrs > 0 {
+		c += attrMapBytes
+	}
+	return c
+}
 
 // parseXMLWithin is parseXML that also refuses a tree whose estimated size
 // (nodeBytes an element, attrBytes an attribute and the bytes of their names
@@ -168,7 +186,7 @@ func parseXMLWithin(b []byte, maxDepth, maxNodes, maxTokens int, budget int64) (
 				return nil, limit("XML elements in one part", maxNodes)
 			}
 			n := &node{name: t.Name.Local}
-			cost += nodeBytes + int64(len(t.Name.Local)) + attrBytes*int64(len(t.Attr))
+			cost += elementCost(len(t.Attr)) + int64(len(t.Name.Local))
 			for _, a := range t.Attr {
 				cost += int64(len(a.Name.Local) + len(a.Value))
 			}

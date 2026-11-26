@@ -530,6 +530,29 @@ func (r *renderer) stops(br *node) ([]stop, error) {
 	return st, nil
 }
 
+// shadeBytes is what the document holds for each shading a gradient creates, and
+// shadeStopBytes for each stop of it. pdfkit keeps a dictionary tree per shading
+// (a stitching function over one exponential function per pair of stops), and
+// Convert holds the written PDF beside it. Measured as the peak heap of a whole
+// Convert per shading (TestSecShadingCostIsMeasured), uses x stops:
+//
+//	stops   peak per shading   charged (12 KiB + 1200 B a stop)
+//	    2    9.2 KiB            14.4 KiB
+//	   16   28.5 KiB            30.8 KiB
+//	   64   73   KiB            87.0 KiB
+//	  256  273   KiB           312   KiB
+//	 1024  975   KiB          1212   KiB
+//
+// pdfkit alone retains 2.6 KiB for two stops and about 600 B a stop beyond
+// (TestSecShadingCostIsMeasured); the rest of the peak is the written PDF
+// (about 100 B a stop) and the garbage not yet collected. That is about 1 KiB a
+// stop at the peak (the earlier 5 KiB + 256 B, calibrated on two
+// stops, was 2.7 times under at 256 to 1024), with a margin of 1.08 to 1.55.
+const (
+	shadeBytes     = 12 << 10
+	shadeStopBytes = 1200
+)
+
 // shade charges the shading a gradient creates to the memory the document
 // holds, then creates it. Every use makes its own object.
 func (r *renderer) shade(s pdfkit.Shading) error {
