@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"strings"
 	"testing"
 
@@ -414,4 +415,16 @@ func TestConvertChargesItsBuffer(t *testing.T) {
 		t.Fatalf("Prepare at its minimum: %v", err)
 	}
 	refuses(t, "convert beside prepare", b, Limits{MaxMemory: n}, ErrLimit)
+}
+
+// A write that fails is an error from Convert, not a PDF cut short.
+func TestConvertReportsAFailedWrite(t *testing.T) {
+	old := writeDoc
+	t.Cleanup(func() { writeDoc = old })
+	boom := errors.New("disk on fire")
+	writeDoc = func(*Doc, io.Writer) (int64, error) { return 0, boom }
+	r, err := Convert(newPkg(page(``)).bytes(t), Limits{})
+	if !errors.Is(err, boom) || r != nil {
+		t.Errorf("result %v, error %v", r, err)
+	}
 }

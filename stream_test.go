@@ -92,8 +92,13 @@ func TestWriteAtomicStreamFailureLeavesNothing(t *testing.T) {
 
 // A directory that is not there is an error, not a panic.
 func TestWriteAtomicStreamNoDirectory(t *testing.T) {
-	if _, err := writeAtomicStream(filepath.Join(t.TempDir(), "missing", "o.pdf"), streamOf("x"), true); err == nil {
+	called := false
+	write := func(w io.Writer) (int64, error) { called = true; return streamOf("x")(w) }
+	if _, err := writeAtomicStream(filepath.Join(t.TempDir(), "missing", "o.pdf"), write, true); err == nil {
 		t.Fatal("wrote into a directory that is not there")
+	}
+	if called {
+		t.Error("the PDF was produced although there was nowhere to put it")
 	}
 }
 
@@ -142,6 +147,11 @@ func TestCopyExclusiveFailures(t *testing.T) {
 	}
 	if err := copyExclusive(dst, src); !errors.Is(err, fs.ErrExist) {
 		t.Errorf("an existing dst: %v", err)
+	}
+	// The source is judged first: a missing one is reported as such even when dst
+	// exists.
+	if err := copyExclusive(dst, filepath.Join(dir, "nothing")); err == nil || errors.Is(err, fs.ErrExist) {
+		t.Errorf("a missing source with an existing dst: %v", err)
 	}
 	if b, _ := os.ReadFile(dst); string(b) != "mine" {
 		t.Errorf("somebody's file became %q", b)

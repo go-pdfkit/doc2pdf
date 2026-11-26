@@ -252,11 +252,15 @@ func Convert(b []byte, lim Limits) (*Result, error) {
 	}
 	var out bytes.Buffer
 	out.Grow(int(min(d.c.stored+d.c.done+64<<10, d.c.lim.MaxMemory)))
-	if _, err := d.WriteTo(&out); err != nil {
+	if _, err := writeDoc(d, &out); err != nil {
 		return nil, err
 	}
 	return &Result{PDF: out.Bytes(), Pages: d.Pages, Skipped: d.Skipped}, nil
 }
+
+// writeDoc writes a prepared document; a test replaces it to make the write fail,
+// which a bytes.Buffer never does.
+var writeDoc = func(d *Doc, w io.Writer) (int64, error) { return d.WriteTo(w) }
 
 // Prepare draws an XPS or OpenXPS file and checks every limit, without writing
 // the PDF: WriteTo does, straight to a writer.
