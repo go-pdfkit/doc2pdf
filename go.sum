@@ -2,6 +2,8 @@ github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAw
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/andybalholm/brotli v1.2.8 h1:H9F6r7RNwzSRsx/lytpIYkbjNFMt2yNBwsJ2+0gpx78=
 github.com/andybalholm/brotli v1.2.8/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
+github.com/andybalholm/brotli v1.3.0 h1:IdkhjSe/+34U+fP7FSR2Q6Poj1hnHUa2GoWmzXJd6qY=
+github.com/andybalholm/brotli v1.3.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/breml/rootcerts v0.3.7 h1:KZZkmd591bmq//te85L0u33zgtI3phyGlfD8u7/pzUg=
 github.com/breml/rootcerts v0.3.7/go.mod h1:S/PKh+4d1HUn4HQovEB8hPJZO6pUZYrIhmXBhsegfXw=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
@@ -24,6 +26,8 @@ github.com/go-docutils/docutils v0.141.1 h1:BqC1Llu4LnAMv0YKYFk7QedEvMJMIcHZJftw
 github.com/go-docutils/docutils v0.141.1/go.mod h1:PQB3SpBv7HKEjFW2kH5+l8+zVeDhFayMnwp8jjT+MXk=
 github.com/go-gfx/gfx v0.37.0 h1:nQH23BtuJ1pqXqvg0s7FHSI1c/ewg9nnBl3Nc3cYCik=
 github.com/go-gfx/gfx v0.37.0/go.mod h1:4OenoKrgdht6UXYf5SV8w2tb41hfAdy4QoxJRPsRDz4=
+github.com/go-gfx/gfx v0.41.0 h1:MVEnory0Zx8ypzuVDrTIWz4Cekv8hn5ilcYg3glJPrk=
+github.com/go-gfx/gfx v0.41.0/go.mod h1:4OenoKrgdht6UXYf5SV8w2tb41hfAdy4QoxJRPsRDz4=
 github.com/go-gfx/oksvg v0.2.0 h1:kuqrSh6aLHy5zM2d2crQf8vP9gnSSmkhsmxOlROnYXo=
 github.com/go-gfx/oksvg v0.2.0/go.mod h1:ap7jj7yma4qOcwiAFzPMC9/eODo7Q2nt71DkEZlHA0k=
 github.com/go-images/gif v0.2.0 h1:8Xl4Nan+PvyqH4wPre7wJUH61T2eJKOKonFKOdMdpkU=
@@ -32,6 +36,8 @@ github.com/go-images/heif v0.0.0-20261125211132-0bd481786f02 h1:r4Z553mxDIV2yjHt
 github.com/go-images/heif v0.0.0-20261125211132-0bd481786f02/go.mod h1:seTR+k9n3rpS95N8AIar2gL6vlUYBHGMiphPd09hBNI=
 github.com/go-images/images v0.1.0 h1:KbbxTUpCbddpf6UsMFQetm75xsRXREyUjX0CIvd8YvE=
 github.com/go-images/images v0.1.0/go.mod h1:+8V6BRjITiKEZyyvZZm//bQ8Pdr5rgHgLEElkVOMm40=
+github.com/go-images/images v0.3.0 h1:uj0bNC9HTvMZF4HvHf5XNVlXYB6zAr8uAdbieTMzuvE=
+github.com/go-images/images v0.3.0/go.mod h1:ep6TePdcpU6ESk2yHuapG9ybfznNsxgHOFOeRKsinZ8=
 github.com/go-images/jpeg v0.3.0 h1:i6CGNbN2YNEz8stBI0hXjN6UwVGwQ9zCh8LvFeD8fHg=
 github.com/go-images/jpeg v0.3.0/go.mod h1:3eUjtNscxUULLUH88DvMN8OKTq2C0/0AjubOjAHoHHk=
 github.com/go-images/jpeg2000 v0.14.0 h1:/nH3l5r95E7OkNZCfq7gmoDQvJzVAhmSw6rd2Ifk7jo=
@@ -48,6 +54,8 @@ github.com/go-opentype/fonts v0.14.0 h1:WHw7k9gkHT1pu9B2yyvd0FWyQqn/4NKFQoKhvMYt
 github.com/go-opentype/fonts v0.14.0/go.mod h1:od2QcmdpKo7QCqo6Jb16y4GULk+h2Hhfq6x3xfvn62Q=
 github.com/go-opentype/opentype v0.20.0 h1:5YePvRwcnfseDSdP4oDHp7uBDtPxQd1I3Q2ZbOxFLfs=
 github.com/go-opentype/opentype v0.20.0/go.mod h1:cyTZyPcwVFR4MTHnCj7a6tk2tGIB6deakpefu/apDjg=
+github.com/go-opentype/opentype v0.22.0 h1:AWxuNf8g6F5lFZ6wrp0Z097yrNANbE0F4b+etGtaWtI=
+github.com/go-opentype/opentype v0.22.0/go.mod h1:xzFnB0oUWXuU1AxQl0CgtQpV8iWY7f5/RRGc9diiBZs=
 github.com/go-pdfkit/document v0.2.0 h1:4cdQLl4bcF0CxEw5eeZtkSGVimwgkR8jTMg5TKUEy6s=
 github.com/go-pdfkit/document v0.2.0/go.mod h1:Lgxm8Na/Nn2EI8Gmh+lpHhcPLwddOTG32GyL4GLki/c=
 github.com/go-pdfkit/extract v0.11.0 h1:qc1/sahrW/AWDL75GjE9qUyoY6jSuhq5th7lGQKG2IY=
@@ -58,6 +66,8 @@ github.com/go-pdfkit/pdffont v0.4.0 h1:3CV2HnmUGHiIYuZ5dJWRLKvi7hMHGWS1RjgNYkEZ0
 github.com/go-pdfkit/pdffont v0.4.0/go.mod h1:l7es3IPbKewQF+sSgPh/bQL18jSewoI0cMjttk7uPlc=
 github.com/go-pdfkit/pdfkit v0.20.0 h1:AvIGB6abZEqeUlzXXweplAfdtSdmHjpo7GsgEMUm6wg=
 github.com/go-pdfkit/pdfkit v0.20.0/go.mod h1:qiVyvQ/GJ2l4qb2OpWfnA7nwaZe5WedcdJCzQRkCYlA=
+github.com/go-pdfkit/pdfkit v0.27.0 h1:xlMDj9uvg58BcM37NdgClbbpADxJMNCkmKbfTDGYUQ0=
+github.com/go-pdfkit/pdfkit v0.27.0/go.mod h1:rwawVt53wjlsZxPB9JrkxLXW3QYP/fcJJ/eD0FWUzzo=
 github.com/go-pdfkit/reader v0.20.0 h1:AM49/MJkaqWx0B8TNaWLuqXBDWE+ULiTqJu4h5XhSiQ=
 github.com/go-pdfkit/reader v0.20.0/go.mod h1:r7knhK/fa8YSYsuq1NrvECGEqfKigYj47Mf0ce7CFCY=
 github.com/go-richdoc/data v0.5.0 h1:67OpOt5RXE3WNs4NfmCav+fN8uXuDwt9ZTmYjDmHVE4=
@@ -92,6 +102,8 @@ github.com/go-webengine/esbuildsandbox v0.1.0 h1:1LdmX+0/yJarQlxZgJ7JIMu+Qy6P7Yz
 github.com/go-webengine/esbuildsandbox v0.1.0/go.mod h1:za8oj1vbDfVkTpHLeRk7JfEQjmJfj+GHNq4R47681vQ=
 github.com/go-widgets/painter v0.16.0 h1:j8FFObisySQChY2JiXS7Di2Mo4cqufIc0PDUnoDPMiA=
 github.com/go-widgets/painter v0.16.0/go.mod h1:3wKWjaM8ZgEhir2HX0UDt8GemePKJ7l/yIjQb/vVSWk=
+github.com/go-widgets/painter v0.17.1 h1:inOmnCGSiHd4oZx7Zm7PJRDWWSEopnEnvDKEeFu9iT0=
+github.com/go-widgets/painter v0.17.1/go.mod h1:8kERcZUoWNyLIas1NsMWiYynvvyx+hcB2cNIh0Bx0yc=
 github.com/goccy/go-yaml v1.19.2 h1:PmFC1S6h8ljIz6gMRBopkjP1TVT7xuwrButHID66PoM=
 github.com/goccy/go-yaml v1.19.2/go.mod h1:XBurs7gK8ATbW4ZPGKgcbrY1Br56PdM69F7LkFRi1kA=
 github.com/google/go-cmp v0.5.5/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=

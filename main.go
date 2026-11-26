@@ -232,6 +232,13 @@ var writeTemp = func(f *os.File, b []byte) error {
 // (fs.ErrExist) even if it appeared a moment ago. The temporary name never
 // outlives the call.
 func writeAtomic(dst string, b []byte, force bool) error {
+	return writeAtomicWith(dst, func(f *os.File) error { return writeTemp(f, b) }, force)
+}
+
+// writeAtomicWith is writeAtomic for a document that is written as it is produced:
+// fill writes the whole file into the one it is given, and may be called twice (once
+// more when the file system has no hard links), so it must be repeatable.
+func writeAtomicWith(dst string, fill func(*os.File) error, force bool) error {
 	// The name is made BEFORE the file is opened, so nothing below needs the
 	// file to find it. crypto/rand.Text cannot fail.
 	name := filepath.Join(filepath.Dir(dst), ".doc2pdf-"+rand.Text()+".tmp")
@@ -240,7 +247,7 @@ func writeAtomic(dst string, b []byte, force bool) error {
 		return err
 	}
 	defer os.Remove(name)
-	err = writeTemp(tmp, b)
+	err = fill(tmp)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
@@ -259,7 +266,7 @@ func writeAtomic(dst string, b []byte, force bool) error {
 	// ⛔ No hard links here (FAT, exFAT, some SMB). Not a Stat and a Rename,
 	// which would reopen the race: create dst with O_EXCL, which refuses an
 	// existing one atomically, and write into it.
-	return createExclusive(dst, b)
+	return createExclusiveWith(dst, fill)
 }
 
 // linkFile is os.Link; a variable only so that a test can say the file system
@@ -270,11 +277,15 @@ var linkFile = os.Link
 // failure removes dst again: O_EXCL proves this call made it, so what is
 // removed is never somebody else's file.
 func createExclusive(dst string, b []byte) error {
+	return createExclusiveWith(dst, func(f *os.File) error { return writeTemp(f, b) })
+}
+
+func createExclusiveWith(dst string, fill func(*os.File) error) error {
 	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
-	err = writeTemp(f, b)
+	err = fill(f)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

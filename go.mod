@@ -9,7 +9,7 @@ require (
 	github.com/go-ooxml/opc v0.2.1
 	github.com/go-pdfkit/document v0.2.0
 	github.com/go-pdfkit/extract v0.11.0
-	github.com/go-pdfkit/pdfkit v0.20.0
+	github.com/go-pdfkit/pdfkit v0.27.0
 	github.com/go-pdfkit/reader v0.20.0
 	github.com/go-richdoc/data v0.5.0
 	github.com/go-richdoc/email v0.4.0
@@ -25,7 +25,7 @@ require (
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.8 // indirect
+	github.com/andybalholm/brotli v1.3.0 // indirect
 	github.com/breml/rootcerts v0.3.7 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9 // indirect
@@ -35,15 +35,15 @@ require (
 	github.com/go-avkit/h265 v0.24.0 // indirect
 	github.com/go-browserhttp/browserhttp v0.2.0 // indirect
 	github.com/go-docutils/docutils v0.141.1 // indirect
-	github.com/go-gfx/gfx v0.37.0 // indirect
+	github.com/go-gfx/gfx v0.41.0 // indirect
 	github.com/go-gfx/oksvg v0.2.0 // indirect
 	github.com/go-images/gif v0.2.0 // indirect
-	github.com/go-images/images v0.1.0 // indirect
+	github.com/go-images/images v0.3.0 // indirect
 	github.com/go-images/jpeg v0.3.0 // indirect
 	github.com/go-images/jpeg2000 v0.14.0 // indirect
 	github.com/go-images/png v0.2.0 // indirect
 	github.com/go-opentype/fonts v0.14.0 // indirect
-	github.com/go-opentype/opentype v0.20.0 // indirect
+	github.com/go-opentype/opentype v0.22.0 // indirect
 	github.com/go-pdfkit/html2pdf v0.4.1 // indirect
 	github.com/go-pdfkit/pdffont v0.4.0 // indirect
 	github.com/go-simd/highway v0.0.14 // indirect
@@ -51,7 +51,7 @@ require (
 	github.com/go-videodsp/kernels v0.19.0 // indirect
 	github.com/go-webengine/engine v0.18.1 // indirect
 	github.com/go-webengine/esbuildsandbox v0.1.0 // indirect
-	github.com/go-widgets/painter v0.16.0 // indirect
+	github.com/go-widgets/painter v0.17.1 // indirect
 	github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect

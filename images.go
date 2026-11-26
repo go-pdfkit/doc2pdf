@@ -6,12 +6,14 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -38,10 +40,9 @@ const (
 var (
 	maxImagePixels = int64(1 << 26) // pixels of one picture (67 million: 8192 x 8192)
 	// Pixels DECODED in one run, not pixels drawn: a grid of large tiles cropped to a sliver
-	// is cheap to draw and costs all its tiles to decode. The PDF is built in memory (pdfkit
-	// has no streaming writer: its Write numbers every object before the first byte goes
-	// out) and held twice, in the document and in the buffer written to disk, at most three
-	// bytes a pixel when the pictures do not compress: 2^27 pixels bound it near 800 MiB.
+	// is cheap to draw and costs all its tiles to decode. The document holds the
+	// compressed pictures (at most about three bytes a pixel when they do not compress)
+	// and pdfkit v0.27.0 writes it straight to the file, so nothing is held twice.
 	maxTotalPixels = int64(1 << 27)
 )
 
@@ -134,12 +135,25 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 		}
 		doc.AddPage(pdfkit.NewPageSize(w, h)).DrawImage(img, pdfkit.Rect{Width: w, Height: h})
 	}
-	var pdf bytes.Buffer
-	if err := writeDocument(doc, &pdf); err != nil {
-		fmt.Fprintf(errOut, "doc2pdf: %v\n", err)
+	// The PDF goes straight into the temporary file, object by object: nothing but the
+	// stored pictures is held. fill runs again if the file system has no hard links, so
+	// the count starts over each time.
+	var size int64
+	var docErr error
+	err := writeAtomicWith(dst, func(f *os.File) error {
+		cw := &countWriter{w: bufio.NewWriter(f)}
+		docErr = writeDocument(doc, cw)
+		if docErr == nil {
+			docErr = cw.w.Flush()
+		}
+		size = cw.n
+		return docErr
+	}, o.force)
+	if docErr != nil {
+		fmt.Fprintf(errOut, "doc2pdf: %v\n", docErr)
 		return 1
 	}
-	if err := writeAtomic(dst, pdf.Bytes(), o.force); err != nil {
+	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(errOut, "doc2pdf: %s is already there; -f overwrites it\n", dst)
 		} else {
@@ -148,6 +162,18 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 		return 1
 	}
 	fmt.Fprintf(out, "%s → %s (%s, read by %s, %d pages, %d bytes)\n",
-		strings.Join(inputs, " "), dst, imageFormat.Name, imageFormat.From, len(inputs), pdf.Len())
+		strings.Join(inputs, " "), dst, imageFormat.Name, imageFormat.From, len(inputs), size)
 	return 0
+}
+
+// countWriter counts what goes through it.
+type countWriter struct {
+	w *bufio.Writer
+	n int64
+}
+
+func (c *countWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
 }
