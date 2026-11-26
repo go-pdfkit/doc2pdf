@@ -68,6 +68,15 @@ const maxFontInstructions = 1 << 20
 // instructionBytes is the size of the fpgm, prep and cvt tables a font's own
 // table directory declares, read before the font is parsed.
 func instructionBytes(b []byte) int64 {
+	if tabs, ok := woffTables(b); ok {
+		var sum int64
+		for _, t := range tabs {
+			if t.instr {
+				sum += t.orig
+			}
+		}
+		return sum
+	}
 	if len(b) < 12 {
 		return 0
 	}
@@ -136,9 +145,18 @@ func (c *converter) font(base, uri string) (*face, error) {
 		return nil, limit("bytes of font instructions", maxFontInstructions)
 	}
 	c.kept += fontCopies * ins
-	if err := c.fits(c.done, 0); err != nil {
+	// ⛔ A WOFF or WOFF2 is inflated by the parser into an sfnt that is held for
+	// the whole conversion, and while it is inflated the stream it comes from is
+	// held beside it: the decoded size, from the directory, is charged before
+	// anything is inflated.
+	dec := decodedBytes(b)
+	c.kept += dec
+	if err := c.fits(c.done, dec); err != nil {
 		return nil, err
 	}
+	// What a subset of this font can copy besides its instruction tables is held
+	// again in the buffer Convert returns the PDF in (see Convert).
+	c.glyphBytes += max(int64(len(b)), dec) - ins
 	ot, err := opentype.Parse(b)
 	var pf *pdfkit.Font
 	if err == nil {
@@ -243,7 +261,11 @@ func (r *renderer) textColor(br *node) (pdfkit.Color, float64, bool, error) {
 		c, a, err := parseColor(br.attr("Color"))
 		return c, a * opacity(br), err == nil, err
 	case "LinearGradientBrush", "RadialGradientBrush":
-		if st := gradientStops(br); len(st) > 0 {
+		st, err := r.stops(br)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		if len(st) > 0 {
 			r.c.note("gradient text fill drawn in its first colour")
 			return st[0].col, st[0].a * opacity(br), true, nil
 		}

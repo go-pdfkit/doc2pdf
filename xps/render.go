@@ -413,7 +413,10 @@ func (r *renderer) stroke(n *node, g *geometry, br *node, alpha float64) error {
 		}
 		col, a = c, ca
 	case "LinearGradientBrush", "RadialGradientBrush":
-		st := gradientStops(br)
+		st, err := r.stops(br)
+		if err != nil {
+			return err
+		}
 		if len(st) == 0 {
 			return nil
 		}
@@ -516,16 +519,38 @@ func gradientStops(br *node) []stop {
 	return out
 }
 
+// stops reads the stops of a gradient brush and charges each one to the work
+// budget, on every path that reads them (a fill, a stroke, a text fill): a
+// brush of a thousand stops used ten thousand times is ten million stops.
+func (r *renderer) stops(br *node) ([]stop, error) {
+	st := gradientStops(br)
+	if err := r.c.work(len(st)); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// shade charges the shading a gradient creates to the memory the document
+// holds, then creates it. Every use makes its own object.
+func (r *renderer) shade(s pdfkit.Shading) error {
+	cost := shadeBytes + shadeStopBytes*int64(len(s.Stops))
+	if err := r.fits(cost); err != nil {
+		return err
+	}
+	r.c.stored += cost
+	return r.p.Shade(s)
+}
+
 // gradient paints a linear or radial gradient through the current clip
 // (§13.5, §13.6). Pad spreading is what is drawn; Reflect and Repeat are
 // counted, and drawn as Pad.
 func (r *renderer) gradient(br *node, alpha float64, cx ctx) error {
-	raw := gradientStops(br)
+	raw, err := r.stops(br)
+	if err != nil {
+		return err
+	}
 	if len(raw) == 0 {
 		return nil
-	}
-	if err := r.c.work(len(raw)); err != nil {
-		return err
 	}
 	var stops []pdfkit.Stop
 	prev := -1.0
@@ -574,7 +599,7 @@ func (r *renderer) gradient(br *node, alpha float64, cx ctx) error {
 		if !ok1 || !ok2 {
 			return fmt.Errorf("xps: unreadable gradient points")
 		}
-		return r.p.Shade(pdfkit.Shading{X0: x0, Y0: y0, X1: x1, Y1: y1, Stops: stops, ExtendStart: true, ExtendEnd: true})
+		return r.shade(pdfkit.Shading{X0: x0, Y0: y0, X1: x1, Y1: y1, Stops: stops, ExtendStart: true, ExtendEnd: true})
 	}
 	cxx, cyy, ok1 := pt("Center", 0.5, 0.5)
 	ox, oy, ok2 := pt("GradientOrigin", 0.5, 0.5)
@@ -607,6 +632,6 @@ func (r *renderer) gradient(br *node, alpha float64, cx ctx) error {
 		}
 	}
 	r.p.Transform(1, 0, 0, s, 0, 0)
-	return r.p.Shade(pdfkit.Shading{X0: ox, Y0: oy / s, X1: cxx, Y1: cyy / s, Stops: stops,
+	return r.shade(pdfkit.Shading{X0: ox, Y0: oy / s, X1: cxx, Y1: cyy / s, Stops: stops,
 		ExtendStart: true, ExtendEnd: true, Radial: true, R0: 0, R1: rx})
 }

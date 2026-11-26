@@ -246,12 +246,15 @@ func Convert(b []byte, lim Limits) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The buffer is one more copy of what the document stores.
-	if err := d.c.fits(d.c.done, d.c.stored+d.c.done+64<<10); err != nil {
+	// The buffer is one more copy of what the document stores: the images, the
+	// content, and the font subsets (their instruction tables are charged at
+	// their copies already; the rest of a font is the most a subset can copy).
+	buf := d.c.stored + d.c.done + d.c.glyphBytes + 64<<10
+	if err := d.c.fits(d.c.done, buf); err != nil {
 		return nil, err
 	}
 	var out bytes.Buffer
-	out.Grow(int(min(d.c.stored+d.c.done+64<<10, d.c.lim.MaxMemory)))
+	out.Grow(int(min(buf-d.c.glyphBytes, d.c.lim.MaxMemory)))
 	if _, err := writeDoc(d, &out); err != nil {
 		return nil, err
 	}
@@ -314,6 +317,10 @@ type converter struct {
 	// kept is the font bytes held, and stored the bytes the document holds for
 	// the images embedded: the two charges of MaxMemory that outlast a draw.
 	kept, stored int64
+	// glyphBytes is the font bytes a subset can copy beyond the instruction
+	// tables (charged at their copies by kept): they are in the PDF the output
+	// buffer receives.
+	glyphBytes int64
 }
 
 // fontCopies is how many more times a font's instruction tables are held than
