@@ -24,14 +24,20 @@ import (
 )
 
 // drive runs the command and returns its exit code and both outputs.
-func drive(t *testing.T, args ...string) (int, string, string) {
+func drive(t *testing.T, args ...string) (code int, outS string, errS string) {
 	t.Helper()
+	defer func() { // a crash of the run is a failure of this call, not of the test binary
+		if r := recover(); r != nil {
+			t.Errorf("the run crashed, %v", r)
+			code, outS, errS = 99, "", ""
+		}
+	}()
 	var out, errOut bytes.Buffer
 	c := RootCmd()
 	c.SetArgs(args)
 	c.SetOut(&out)
 	c.SetErr(&errOut)
-	code := 0
+	code = 0
 	if err := c.Execute(); err != nil {
 		if e, ok := err.(exitCode); ok {
 			code = int(e)

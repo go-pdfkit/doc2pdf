@@ -73,7 +73,33 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | OpenDocument Spreadsheet | `.ods` | `go-odf/odf` |
 | OpenDocument Presentation | `.odp` | `go-odf/odf` |
 | OpenDocument Graphics | `.odg` | `go-odf/odf` |
+| HEIF image | `.heic` `.heif` `.hif` | `go-images/heif` |
 | XPS / OpenXPS | `.xps` `.oxps` | `go-pdfkit/doc2pdf/xps` |
+
+**HEIC and HEIF pictures** are pictures, not documents, so they skip the richdoc
+model: each file becomes one page whose size is the decoded picture's, *after*
+its rotation, mirroring and cropping, laid at `--dpi` (default 150). A picture too
+large for a PDF page (14400 points a side) is scaled down to fit. Give several
+files and they become one PDF, in order; a last argument ending in `.pdf` is the
+output, and without one the output is named after the first file:
+
+```
+doc2pdf photo.heic                          # photo.pdf, one page
+doc2pdf --dpi 300 a.heic b.heic album.pdf   # album.pdf, two pages
+```
+
+Pictures are untrusted input, so a run is bounded: `--dpi` is between 0.001 and
+1000000 (NaN, infinities and denormals are refused), at most 256 pictures, 67
+million pixels for one and 134 million decoded pixels for all of them (a grid is
+charged all its tiles, not its cropped size), and `--max-input` bytes for each
+file. Over any of them the run stops with an error. The PDF is written straight
+into its temporary file (pdfkit v0.27.0 streams it), so memory is the decoded
+picture being drawn plus the compressed pictures already drawn: measured, writing
+a 3.2 MB document of pictures that do not compress allocates 8.6 KB.
+
+Pictures and documents cannot be joined in one run (exit 2). Only the HEVC
+pictures of a HEIF file are read; alpha, HDR gain maps and image sequences are
+not (see the [go-images/heif README](https://github.com/go-images/heif#not-supported)).
 
 ### XPS and OpenXPS: drawn, not rasterised
 

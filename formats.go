@@ -202,5 +202,6 @@ func knownSuffixes() string {
 	for _, f := range formats {
 		all = append(all, f.Suffixes...)
 	}
+	all = append(all, imageFormat.Suffixes...)
 	return "it reads " + strings.Join(all, " ")
 }
