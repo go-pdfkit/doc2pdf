@@ -3,7 +3,7 @@ module github.com/go-pdfkit/doc2pdf
 go 1.27.4
 
 require (
-	github.com/go-images/heif v0.0.0-20261125211132-0bd481786f02
+	github.com/go-images/heif v0.0.0-20261127091549-3d0cd09a2008
 	github.com/go-odf/odf v0.11.0
 	github.com/go-ooxml/ooxml v0.8.0
 	github.com/go-ooxml/opc v0.2.1
@@ -32,7 +32,7 @@ require (
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/evanw/esbuild v0.28.2 // indirect
 	github.com/go-avkit/bitstream v0.4.0 // indirect
-	github.com/go-avkit/h265 v0.24.0 // indirect
+	github.com/go-avkit/h265 v0.24.2 // indirect
 	github.com/go-browserhttp/browserhttp v0.2.0 // indirect
 	github.com/go-docutils/docutils v0.141.1 // indirect
 	github.com/go-gfx/gfx v0.41.0 // indirect
@@ -48,7 +48,7 @@ require (
 	github.com/go-pdfkit/pdffont v0.4.0 // indirect
 	github.com/go-simd/highway v0.0.14 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
-	github.com/go-videodsp/kernels v0.19.0 // indirect
+	github.com/go-videodsp/kernels v0.21.0 // indirect
 	github.com/go-webengine/engine v0.18.1 // indirect
 	github.com/go-webengine/esbuildsandbox v0.1.0 // indirect
 	github.com/go-widgets/painter v0.17.1 // indirect

@@ -217,8 +217,9 @@ func TestPicturesAreBounded(t *testing.T) {
 		t.Errorf("exactly %d pictures: code %d, %q", maxImages, code, errOut)
 	}
 
-	// a run is charged what is decoded: the coded size, padded to 68 x 46
-	const px = 68 * 46
+	// a run is charged what is decoded: the coded size of the SPS, 160 x 64 (heif reads it from
+	// the parameter sets, not from the ispe, since go-images/heif 3d0cd09)
+	const px = 160 * 64
 	defer func(a, b int64) { maxImagePixels, maxTotalPixels = a, b }(maxImagePixels, maxTotalPixels)
 	maxTotalPixels = 2 * px
 	if code, _, errOut := drive(t, many(2)...); code != 0 {
