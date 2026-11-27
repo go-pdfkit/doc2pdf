@@ -7,12 +7,14 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 
 	"github.com/go-odf/odf"
 	"github.com/go-ooxml/ooxml"
 	"github.com/go-ooxml/opc"
+	"github.com/go-pdfkit/doc2pdf/xps"
 	"github.com/go-richdoc/data/csv"
 	"github.com/go-richdoc/data/json"
 	"github.com/go-richdoc/data/text"
@@ -117,7 +119,34 @@ var formats = []format{
 	{"OpenDocument Spreadsheet", []string{".ods"}, odf.Parse, "go-odf/odf"},
 	{"OpenDocument Presentation", []string{".odp"}, odf.Parse, "go-odf/odf"},
 	{"OpenDocument Graphics", []string{".odg"}, odf.Parse, "go-odf/odf"},
+	// ⛔ XPS HAS NO Read, ON PURPOSE. richdoc is a flow of blocks, and a page
+	// whose every glyph sits where its producer put it cannot be turned into one
+	// without losing the one thing that makes it an XPS file. It is drawn
+	// straight onto PDF pages instead, as vectors and real text: see
+	// directReaders.
+	{"XPS", []string{".xps", ".oxps"}, nil, "go-pdfkit/doc2pdf/xps"},
 }
+
+// A direct reader draws the PDF itself, for a format with no richdoc form. It
+// returns what writes the PDF to a writer, as it goes, and what the file used
+// that was not drawn. Everything that can refuse has done so by then.
+type direct func(src []byte) (write func(io.Writer) (int64, error), notDrawn []string, err error)
+
+// directReaders are the formats whose Read is nil, by Name.
+var directReaders = map[string]direct{
+	"XPS": func(src []byte) (func(io.Writer) (int64, error), []string, error) {
+		// The package limit is the one this command accepted (-max-input may
+		// have raised it), never less than xps's default.
+		d, err := xps.Prepare(src, xps.Limits{MaxPackageBytes: max(int64(len(src)), xpsDefaultMaxInput)})
+		if err != nil {
+			return nil, nil, err
+		}
+		return d.WriteTo, d.Skipped, nil
+	},
+}
+
+// xpsDefaultMaxInput is xps.Limits' default package size, 128 MiB.
+const xpsDefaultMaxInput = 128 << 20
 
 // rtfDefaultMaxInput is go-richdoc/rtf v0.1.2's default MaxInput (16 MiB). The
 // package exports no constant for it; the value is stated in its Limits
@@ -132,6 +161,7 @@ const defaultMaxInput = 256 << 20
 // formatMaxInput holds the formats whose limit differs from defaultMaxInput.
 var formatMaxInput = map[string]int64{
 	"RTF": rtfDefaultMaxInput,
+	"XPS": xpsDefaultMaxInput,
 }
 
 // MaxInput is the largest file, in bytes, this format is read from.

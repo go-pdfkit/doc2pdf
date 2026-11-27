@@ -83,6 +83,7 @@ func TestEveryFormatItClaimsToReadBecomesAPDF(t *testing.T) {
 		"a.ods":  odPackage(t, "spreadsheet", odsBody),
 		"a.odp":  odPackage(t, "presentation", odpBody),
 		"a.odg":  odPackage(t, "graphics", odgBody),
+		"a.xps":  xpsPackage(t, `<Path Data="M 10,10 L 90,10 90,60 Z" Fill="#FFFF0000"/>`),
 	}
 
 	for name, body := range cases {
@@ -116,7 +117,7 @@ func TestEveryFormatItClaimsToReadBecomesAPDF(t *testing.T) {
 	// It did not: odf.Write builds one, exactly as ooxml.WriteWord does for
 	// Word above. A stated gap is still a claim, and that one had stopped being
 	// true before it was written down.
-	const covered = 15
+	const covered = 16
 	if len(cases) != covered {
 		t.Fatalf("%d formats are exercised; the count says %d", len(cases), covered)
 	}

@@ -302,9 +302,9 @@ func TestPictureFailuresAreReported(t *testing.T) {
 }
 
 func TestADocumentThatCannotBeWrittenIsReported(t *testing.T) {
-	old := writeDocument
-	defer func() { writeDocument = old }()
-	writeDocument = func(*pdfkit.Document, io.Writer) error { return errors.New("disk of glass") }
+	old := writePictures
+	defer func() { writePictures = old }()
+	writePictures = func(*pdfkit.Document, io.Writer) error { return errors.New("disk of glass") }
 	dst := filepath.Join(t.TempDir(), "w.pdf")
 	code, _, errOut := drive(t, heic(t, "small.heic"), dst)
 	if code != 1 || !strings.Contains(errOut, "disk of glass") {

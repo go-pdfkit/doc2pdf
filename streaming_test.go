@@ -36,7 +36,7 @@ func TestTheDocumentIsStreamedNotBuffered(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	err := writeAtomicWith(dst, func(f *os.File) error { return writeDocument(doc, f) }, false)
+	err := writeAtomicWith(dst, func(f *os.File) error { return writePictures(doc, f) }, false)
 	runtime.ReadMemStats(&after)
 	if err != nil {
 		t.Fatal(err)

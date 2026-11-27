@@ -1,7 +1,7 @@
 # doc2pdf
 
 **Any document into a PDF.** Word, Excel, PowerPoint, OpenDocument Text,
-Spreadsheet, Presentation and Graphics, Markdown, reStructuredText, HTML,
+Spreadsheet, Presentation and Graphics, XPS, Markdown, reStructuredText, HTML,
 plain text, CSV, JSON, XML, EPUB, MOBI, FictionBook and email — through the
 [richdoc](https://github.com/go-richdoc/richdoc) document model and
 [go-pdfkit/document](https://github.com/go-pdfkit/document).
@@ -74,6 +74,7 @@ report.docx → report.pdf (Word, read by go-ooxml/ooxml, 44102 bytes)
 | OpenDocument Presentation | `.odp` | `go-odf/odf` |
 | OpenDocument Graphics | `.odg` | `go-odf/odf` |
 | HEIF image | `.heic` `.heif` `.hif` | `go-images/heif` |
+| XPS / OpenXPS | `.xps` `.oxps` | `go-pdfkit/doc2pdf/xps` |
 
 **HEIC and HEIF pictures** are pictures, not documents, so they skip the richdoc
 model: each file becomes one page whose size is the decoded picture's, *after*
@@ -99,6 +100,105 @@ a 3.2 MB document of pictures that do not compress allocates 8.6 KB.
 Pictures and documents cannot be joined in one run (exit 2). Only the HEVC
 pictures of a HEIF file are read; alpha, HDR gain maps and image sequences are
 not (see the [go-images/heif README](https://github.com/go-images/heif#not-supported)).
+
+### XPS and OpenXPS: drawn, not rasterised
+
+XPS is a fixed-layout format, so it does not go through richdoc: the
+`xps` package reads the package (ECMA-388, an Open Packaging Conventions ZIP) and draws each
+page straight onto a PDF page. The output is **vector**: paths stay paths,
+gradients stay shadings, and a `Glyphs` run becomes real text in an **embedded
+font** (the font part, de-obfuscated when it is a `.odttf`), so the text is
+selectable and searchable. Drawn: `Path` (abbreviated and element geometry,
+fill rules, strokes with dashes, caps, joins and miter limit), `Canvas`
+(transform, clip, opacity, resource dictionaries), linear and radial
+gradients, `ImageBrush` with PNG, JPEG and TIFF (including the tile modes),
+`Glyphs` (indices, clusters, advances, offsets, bold and italic simulation,
+right-to-left), and Markup Compatibility fallbacks.
+
+What it does **not** draw is printed, never silent:
+
+```
+page.oxps → page.pdf (XPS, read by go-pdfkit/doc2pdf/xps, 5120 bytes)
+  not drawn: VisualBrush
+```
+
+Not drawn or approximated: `VisualBrush`, `OpacityMask`, gradient spread
+`Reflect` and `Repeat` (drawn as `Pad`), `IsSideways`, TrueType collections,
+JPEG XR images, ICC profiles, remote resource dictionaries, hyperlinks and
+outlines, gradient stop alpha, gradient or image fills on text and strokes
+(the first colour is used), and the `Triangle` line cap.
+
+**Untrusted files, and what they can cost.** An XPS file is a ZIP of XML whose
+author chose every number in it, so every ceiling is a `xps.Limits` field and
+a refusal names what was exceeded. At the **default limits** (what `doc2pdf`
+passes) the peak heap was measured, under a 640 MiB soft memory limit
+(`GOMEMLIMIT`), on the worst input found for each cost: a package of 85 KB that
+asks for ten million path segments is refused at about **220 MiB** (the
+content stream is an in-memory buffer, so it is budgeted in bytes,
+`MaxContentBytes`, 48 MiB, as the PDF library counts them after every drawn
+element, since a dash array of 126 long numbers is as many bytes as a hundred
+segments); a dashed-path bomb is refused at 244 MiB, a tile bomb at 153 MiB,
+seven 32 MiB JPEG parts at 140 MiB. All of the memory a conversion holds is
+ONE budget, `MaxMemory` (160 MiB), because separate ceilings added up (the
+third review stacked them to 901 MiB on a 60 MB package). It is charged the
+font parts kept, each embedded image at the size the PDF library reports for
+it once embedded (`StoredLen`; before that, a JPEG at its length, and a PNG or
+TIFF at an estimate of 3 bytes a pixel, 4 with alpha, 1024 declared pixels a
+byte at most, so a 36-byte stub declaring 6000 x 6000 is refused), and the
+page content (`ContentLen`). The PDF is NOT held again: `doc2pdf` writes it
+straight into the temporary file (`xps.Prepare` then `Doc.WriteTo`), and
+only the bytes API, `xps.Convert`, which returns a buffer, is charged one more
+copy. A JPEG is read and then copied, so both count while it is embedded. A
+font's `fpgm`, `prep` and `cvt ` tables are copied whole into every subset, so
+they are capped at 1 MiB a font and charged four more times; the XML tree of a page
+is charged 128 bytes an element and 96 an attribute (plus their text) while it
+is built. An image part nothing draws is not kept, and an
+image drawn forty times is stored once. A PNG or TIFF has its decode memory
+estimated from the header BEFORE it is decoded (`MaxDecodeBytes`, 192 MiB: 24
+bytes a pixel for 8-bit colour, 40 for 16-bit, 32 more for a TIFF, whose
+reader inflates a strip into a doubling buffer), charged for the decode only
+and released, and is charged its pixels once (`MaxDrawnPixels`); a JPEG is
+embedded as it is and never decoded here, progressive ones included; tile
+indices beyond 2^31 are refused;
+sixteen case-spelled aliases of one 8 MiB part cost 8 MiB, because a part is
+cached under its real name; a `<!DOCTYPE>` is refused (the attribute scan and
+`encoding/xml` disagreed about where one ends), and four million attributes on
+one element are refused before they are allocated (at most 256 per element,
+duplicates refused) at 19 MiB. **No probe of the three security reviews exceeded
+250 MiB** at the defaults (the third review's inputs, at most 220 MiB under
+`-race`), and `xps/security2_test.go` and `xps/security3_test.go` fail any of
+them above **400 MiB** (`worstPeakMiB`), which is the bound the tests assert.
+That is a measurement on those inputs, not a proof: an element is measured
+after it is written, so it overshoots the content budget by what one element
+can write, a raster image is checked before it is embedded on an estimate (the
+charge after it is the real size), and a part is read again when it is
+embedded, so it counts twice against the ratio budget. The fourth review's
+probes, at the defaults, peaked at 160 MiB (zero-padded JPEGs, refused),
+164 to 187 MiB (noise fonts, refused on instructions), 187 MiB (a 17,231 x 256
+XML tree, refused) and 111 MiB for fonts, images and tree together
+(converted), where they had been 555, 709 to 761 and 489 MiB; seven 32 MiB JPEG
+parts peak at 247 MiB. The cost constants for the tree come from those probes.
+
+The fifth to seventh reviews (released as v0.4.0, security review CLEAR at the
+seventh) changed three things you should know. **WOFF and WOFF2 fonts are
+refused** by signature, with a named error and a skip note, because ECMA-388
+section 9.1.7 requires OpenType (TrueType and CFF) fonts only: such a font is
+never parsed. Every shading is charged 12 KiB plus 1200 bytes a stop to the
+memory budget, and an element with attributes is charged 400 bytes more for its
+attribute map; both are **measured upper bounds, not values read from the PDF
+library**. And the worst measured peak under `-race` is up to **375 MiB**
+(against the 400 MiB test gate), so size a container for that, not for the
+plain-run figures above. A conversion through the bytes API holds the whole
+PDF in memory, as said above.
+
+⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
+`ImageSource` with a scheme, a `..` that leaves the package, or a part that
+is not there is refused. Every size is bounded before it is allocated: package,
+part and total uncompressed bytes, the compression ratio, part count, pages,
+elements and nesting per part, segments per path, glyphs per run, fonts, image
+pixels (read from the header, before any decode), tiles, the content stream,
+and an overall work budget charged for every draw. A bound that is hit is an error that names it,
+and the file is refused whole.
 
 **What RTF conversion keeps.** Structure: headings, lists, tables, hyperlinks
 (http, https, mailto), footnotes, PNG and JPEG pictures, bold, italic, strike,
@@ -152,7 +252,7 @@ hyphenation and justification are the point and a six-megabyte engine is
 acceptable; reach for this one when CGO-free, `GOOS=js`-capable and keeping
 emphasis, links and tables matter more.
 
-⛔ **Fifteen of the nineteen formats are exercised end to end**, and the test
+⛔ **Sixteen of the twenty formats are exercised end to end**, and the test
 says so by asserting that number against the table. EPUB, MOBI, FictionBook and
 PowerPoint need a real package built as a fixture, which is its own work — a
 known gap recorded rather than an unnoticed one.

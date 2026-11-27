@@ -46,9 +46,9 @@ var (
 	maxTotalPixels = int64(1 << 27)
 )
 
-// writeDocument serialises the document; a variable so a test can make it fail, which
+// writePictures serialises the document; a variable so a test can make it fail, which
 // a bytes.Buffer never does.
-var writeDocument = func(doc *pdfkit.Document, w io.Writer) error { return doc.Write(w) }
+var writePictures = func(doc *pdfkit.Document, w io.Writer) error { return doc.Write(w) }
 
 // isImage reports whether a file name has the suffix of a picture this reads.
 func isImage(path string) bool {
@@ -141,7 +141,7 @@ func runImages(out, errOut io.Writer, o options, args []string) int {
 	var size int64
 	err := writeAtomicWith(dst, func(f *os.File) error {
 		cw := &countWriter{w: bufio.NewWriter(f)}
-		if err := writeDocument(doc, cw); err != nil {
+		if err := writePictures(doc, cw); err != nil {
 			return err
 		}
 		size = cw.n
