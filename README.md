@@ -153,6 +153,18 @@ XML tree, refused) and 111 MiB for fonts, images and tree together
 (converted), where they had been 555, 709 to 761 and 489 MiB; seven 32 MiB JPEG
 parts peak at 247 MiB. The cost constants for the tree come from those probes.
 
+The fifth to seventh reviews (released as v0.4.0, security review CLEAR at the
+seventh) changed three things you should know. **WOFF and WOFF2 fonts are
+refused** by signature, with a named error and a skip note, because ECMA-388
+section 9.1.7 requires OpenType (TrueType and CFF) fonts only: such a font is
+never parsed. Every shading is charged 12 KiB plus 1200 bytes a stop to the
+memory budget, and an element with attributes is charged 400 bytes more for its
+attribute map; both are **measured upper bounds, not values read from the PDF
+library**. And the worst measured peak under `-race` is up to **375 MiB**
+(against the 400 MiB test gate), so size a container for that, not for the
+plain-run figures above. A conversion through the bytes API holds the whole
+PDF in memory, as said above.
+
 ⛔ **A package is hostile input.** Nothing is fetched: a `FontUri` or
 `ImageSource` with a scheme, a `..` that leaves the package, or a part that
 is not there is refused. Every size is bounded before it is allocated: package,
