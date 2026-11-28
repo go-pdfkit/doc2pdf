@@ -7,7 +7,7 @@ require (
 	github.com/go-odf/odf v0.11.0
 	github.com/go-ooxml/ooxml v0.8.0
 	github.com/go-ooxml/opc v0.2.1
-	github.com/go-opentype/opentype v0.22.0
+	github.com/go-opentype/opentype v0.26.0
 	github.com/go-pdfkit/document v0.2.0
 	github.com/go-pdfkit/extract v0.11.0
 	github.com/go-pdfkit/pdfkit v0.27.0
@@ -23,7 +23,7 @@ require (
 	github.com/go-richdoc/rst v0.15.0
 	github.com/go-richdoc/rtf v0.1.2
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/image v0.47.0
+	golang.org/x/image v0.48.0
 )
 
 require (
@@ -63,6 +63,6 @@ require (
 	github.com/yuin/goldmark v1.8.7 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 )
